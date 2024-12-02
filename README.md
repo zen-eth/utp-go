@@ -1,2 +1,3 @@
 # utp-go
-Go language version implemented based on [utp for Rust](https://github.com/ethereum/utp).
+
+A Go implementation of the µTorrent Transport Protocol (uTP).
