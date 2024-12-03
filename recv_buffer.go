@@ -1,6 +1,10 @@
 package utp_go
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/optimism-java/utp-go/rs"
+)
 
 type ReceiveBuffer struct {
 	buf        []byte
@@ -90,7 +94,7 @@ func (rb *ReceiveBuffer) AckNum() uint16 {
 	return rb.initSeqNum + rb.consumed
 }
 
-func (rb *ReceiveBuffer) SelectiveAck() []bool {
+func (rb *ReceiveBuffer) SelectiveAck() *rs.SelectiveAck {
 	if len(rb.pending) == 0 {
 		return nil
 	}
@@ -107,5 +111,5 @@ func (rb *ReceiveBuffer) SelectiveAck() []bool {
 		next++
 	}
 
-	return acked
+	return rs.NewSelectiveAck(acked)
 }

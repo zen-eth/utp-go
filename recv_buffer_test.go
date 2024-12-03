@@ -192,36 +192,36 @@ func TestAckNum(t *testing.T) {
 	}
 }
 
-//func TestSelectiveAck(t *testing.T) {
-//	initSeqNum := uint16(0xFFFF)
-//	buf := NewReceiveBuffer(RECV_SIZE, initSeqNum)
-//
-//	selectiveAck := buf.SelectiveAck()
-//	if selectiveAck != nil {
-//		t.Errorf("expected no selective ack, got %v", selectiveAck)
-//	}
-//
-//	const DATA_LEN = 64
-//	data := make([]byte, DATA_LEN)
-//	for i := range data {
-//		data[i] = 0xef
-//	}
-//
-//	// Write out-of-order packet.
-//	seqNum := initSeqNum + 2
-//	buf.Write(data, seqNum)
-//
-//	selectiveAck = buf.SelectiveAck()
-//	if selectiveAck == nil || !selectiveAck.Acked()[0] {
-//		t.Errorf("expected selective ack with first packet acked, got %v", selectiveAck)
-//	}
-//
-//	// Write in-order packet.
-//	seqNum = initSeqNum + 1
-//	buf.Write(data, seqNum)
-//
-//	selectiveAck = buf.SelectiveAck()
-//	if selectiveAck != nil {
-//		t.Errorf("expected no selective ack, got %v", selectiveAck)
-//	}
-//}
+func TestSelectiveAck(t *testing.T) {
+	initSeqNum := uint16(0xFFFF)
+	buf := NewReceiveBuffer(RECV_SIZE, initSeqNum)
+
+	selectiveAck := buf.SelectiveAck()
+	if selectiveAck != nil {
+		t.Errorf("expected no selective ack, got %v", selectiveAck)
+	}
+
+	const DATA_LEN = 64
+	data := make([]byte, DATA_LEN)
+	for i := range data {
+		data[i] = 0xef
+	}
+
+	// Write out-of-order packet.
+	seqNum := initSeqNum + 2
+	buf.Write(data, seqNum)
+
+	selectiveAck = buf.SelectiveAck()
+	if selectiveAck == nil || !selectiveAck.Acked()[0] {
+		t.Errorf("expected selective ack with first packet acked, got %v", selectiveAck)
+	}
+
+	// Write in-order packet.
+	seqNum = initSeqNum + 1
+	buf.Write(data, seqNum)
+
+	selectiveAck = buf.SelectiveAck()
+	if selectiveAck != nil {
+		t.Errorf("expected no selective ack, got %v", selectiveAck)
+	}
+}

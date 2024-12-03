@@ -74,12 +74,12 @@ func (s *SentPackets) OnTimeout() {
 }
 
 func (s *SentPackets) NextSeqNum() uint16 {
-	return s.initSeqNum + uint16(len(s.packets)) + 1
+	return s.initSeqNum + uint16(len(s.packets)) + uint16(1)
 }
 
 func (s *SentPackets) AckNum() uint16 {
-	num, err := s.LastAckNum()
-	if err != nil {
+	num, isNone := s.LastAckNum()
+	if isNone {
 		return 0
 	}
 	return num
@@ -257,7 +257,7 @@ func (s *SentPackets) OnSelectiveAck(
 
 	// The first bit of the selective ACK corresponds to ackNum + 2,
 	// where ackNum + 1 is assumed to have been dropped
-	sackNum := ackNum + 2 // wrapping addition for uint16
+	sackNum := ackNum + 2
 
 	for _, ack := range selectiveAck.Acked() {
 		// Break once we exhaust all sent sequence numbers
@@ -267,10 +267,12 @@ func (s *SentPackets) OnSelectiveAck(
 		}
 
 		if ack {
-			return s.Ack(sackNum, delay, now)
+			if err := s.Ack(sackNum, delay, now); err != nil {
+				return err
+			}
 		}
 
-		sackNum++ // wrapping addition for uint16
+		sackNum += uint16(1) // wrapping addition for uint16
 	}
 	return nil
 }
@@ -316,7 +318,7 @@ func (s *SentPackets) Ack(seqNum uint16, delay time.Duration, now time.Time) err
 
 	packetInst.acks = append(packetInst.acks, now)
 
-	s.lostPackets.Remove(packetInst.seqNum)
+	s.lostPackets = s.lostPackets.Remove(packetInst.seqNum)
 	return nil
 }
 
@@ -340,17 +342,21 @@ func (s *SentPackets) AckPriorUnacked(seqNum uint16, delay time.Duration, now ti
 	return nil
 }
 
-func (s *SentPackets) LastAckNum() (uint16, error) {
+func (s *SentPackets) LastAckNum() (uint16, bool) {
 	if len(s.packets) == 0 {
-		return 0, ErrNoneAckNum
+		return 0, true
 	}
 	var num uint16
+	var none bool
 	for _, sendtPacket := range s.packets {
 		if len(sendtPacket.acks) != 0 {
 			num = sendtPacket.seqNum
+		} else {
+			none = true
+			break
 		}
 	}
-	return num, nil
+	return num, none
 }
 
 func (s *SentPackets) OnLost(seqNum uint16, retransmitting bool) error {
@@ -380,8 +386,8 @@ func (s *SentPackets) FirstUnackedSeqNum() (uint16, error) {
 	}
 
 	var seqNum uint16
-	lastAckNum, err := s.LastAckNum()
-	if err != nil {
+	lastAckNum, isNone := s.LastAckNum()
+	if isNone {
 		seqNum = s.initSeqNum + uint16(1)
 	} else {
 		if s.packets[len(s.packets)-1].seqNum == lastAckNum {
