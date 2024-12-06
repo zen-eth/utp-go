@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	defaultTargetMicros       = 100000
+	defaultTargetMicros       = 100000 * time.Microsecond
 	defaultInitialTimeout     = time.Second
 	defaultMinTimeout         = 500 * time.Millisecond
 	defaultMaxTimeout         = 60 * time.Second
@@ -43,7 +43,7 @@ var (
 	ErrDuplicateTransmission  = errors.New("duplicate transmission")
 )
 
-type Config struct {
+type CtrlConfig struct {
 	TargetDelayMicros     uint32
 	InitialTimeout        time.Duration
 	MinTimeout            time.Duration
@@ -52,11 +52,12 @@ type Config struct {
 	MaxWindowSizeIncBytes uint32
 	Gain                  float32
 	DelayWindow           time.Duration
+	WindowSize            uint32
 }
 
-func DefaultConfig() Config {
-	return Config{
-		TargetDelayMicros:     defaultTargetMicros,
+func DefaultCtrlConfig() *CtrlConfig {
+	return &CtrlConfig{
+		TargetDelayMicros:     uint32(defaultTargetMicros.Microseconds()),
 		InitialTimeout:        defaultInitialTimeout,
 		MinTimeout:            defaultMinTimeout,
 		MaxTimeout:            defaultMaxTimeout,
@@ -93,7 +94,7 @@ type DefaultController struct {
 	mu                    sync.Mutex
 }
 
-func NewController(config Config) *DefaultController {
+func NewDefaultController(config *CtrlConfig) *DefaultController {
 	return &DefaultController{
 		targetDelayMicros:     config.TargetDelayMicros,
 		timeout:               config.InitialTimeout,
@@ -164,7 +165,7 @@ func (c *DefaultController) OnAck(seqNum uint16, ack Ack) error {
 	defer c.mu.Unlock()
 	packetInst, exists := c.transmissions[seqNum]
 	if !exists {
-		return errors.New("unknown sequence number")
+		return ErrUnknownSeqNum
 	}
 
 	if packetInst.Acked {
@@ -211,7 +212,7 @@ func (c *DefaultController) OnAck(seqNum uint16, ack Ack) error {
 func (c *DefaultController) OnLostPacket(seqNum uint16, retransmitting bool) error {
 	packetInst, exists := c.transmissions[seqNum]
 	if !exists {
-		return errors.New("unknown sequence number")
+		return ErrUnknownSeqNum
 	}
 
 	c.maxWindowSizeBytes = uint32(math.Max(float64(c.maxWindowSizeBytes/2), float64(c.minWindowSizeBytes)))
@@ -223,9 +224,10 @@ func (c *DefaultController) OnLostPacket(seqNum uint16, retransmitting bool) err
 	return nil
 }
 
-func (c *DefaultController) OnTimeout() {
+func (c *DefaultController) OnTimeout() error {
 	c.maxWindowSizeBytes = c.minWindowSizeBytes
 	c.timeout = time.Duration(math.Min(float64(c.timeout*2), float64(c.maxTimeout)))
+	return nil
 }
 
 // applyMaxWindowSizeAdjustment adjusts the maximum window size based on the given adjustment.
@@ -308,27 +310,23 @@ func NewDelayAccumulator(window time.Duration) *DelayAccumulator {
 }
 
 func (da *DelayAccumulator) Push(delay time.Duration, receivedAt time.Time) {
-	da.mu.Lock()
-	defer da.mu.Unlock()
 	heap.Push(da.delays, Delay{
 		Value:    delay,
 		Deadline: receivedAt.Add(da.window),
 	})
 }
 
-func (da *DelayAccumulator) BaseDelay() *time.Duration {
-	da.mu.Lock()
-	defer da.mu.Unlock()
+func (da *DelayAccumulator) BaseDelay() time.Duration {
 	now := time.Now()
 	for da.delays.Len() > 0 {
 		min := (*da.delays)[0]
 		if now.After(min.Deadline) {
 			heap.Pop(da.delays)
 		} else {
-			return &min.Value
+			return min.Value
 		}
 	}
-	return nil
+	return time.Duration(0)
 }
 
 type DelayHeap []Delay
@@ -343,8 +341,8 @@ func (h *DelayHeap) Push(x interface{}) {
 
 func (h *DelayHeap) Pop() interface{} {
 	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[0 : n-1]
+	n := len(old) - 1
+	x := old[n]
+	*h = old[:n]
 	return x
 }

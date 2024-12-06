@@ -39,9 +39,9 @@ func TestRecvBufferAvailable(t *testing.T) {
 
 	// Read all data.
 	readBuf := make([]byte, DATA_LEN*2)
-	n, err := buf.Read(readBuf)
-	if err != nil || n != DATA_LEN*2 {
-		t.Errorf("expected to read %d bytes, got %d, error: %v", DATA_LEN*2, n, err)
+	n := buf.Read(readBuf)
+	if n != DATA_LEN*2 {
+		t.Errorf("expected to read %d bytes, got %d", DATA_LEN*2, n)
 	}
 	if buf.Available() != RECV_SIZE {
 		t.Errorf("expected available size to be %d, got %d", RECV_SIZE, buf.Available())
@@ -131,9 +131,9 @@ func TestRecvBufferRead(t *testing.T) {
 	buf.Write(dataSecond, seqNum)
 
 	readBuf := make([]byte, RECV_SIZE)
-	n, err := buf.Read(readBuf)
-	if err != nil || n != 0 {
-		t.Errorf("expected to read 0 bytes, got %d, error: %v", n, err)
+	n := buf.Read(readBuf)
+	if n != 0 {
+		t.Errorf("expected to read 0 bytes, got %d", n)
 	}
 
 	// Write in-order packet.
@@ -144,9 +144,9 @@ func TestRecvBufferRead(t *testing.T) {
 	seqNum = initSeqNum + 1
 	buf.Write(dataFirst, seqNum)
 
-	n, err = buf.Read(readBuf)
-	if err != nil || n != DATA_LEN*2 {
-		t.Errorf("expected to read %d bytes, got %d, error: %v", DATA_LEN*2, n, err)
+	n = buf.Read(readBuf)
+	if n != DATA_LEN*2 {
+		t.Errorf("expected to read %d bytes, got %d", DATA_LEN*2, n)
 	}
 	if buf.offset != 0 {
 		t.Errorf("expected buffer offset to be 0, got %d", buf.offset)
@@ -155,9 +155,9 @@ func TestRecvBufferRead(t *testing.T) {
 		t.Errorf("unexpected data read from buffer")
 	}
 
-	n, err = buf.Read(readBuf)
-	if err != nil || n != 0 {
-		t.Errorf("expected to read 0 bytes, got %d, error: %v", n, err)
+	n = buf.Read(readBuf)
+	if n != 0 {
+		t.Errorf("expected to read 0 bytes, got %d", n)
 	}
 }
 

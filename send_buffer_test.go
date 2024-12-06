@@ -47,7 +47,7 @@ func TestRead(t *testing.T) {
 
 	// Read of empty buffer returns zero.
 	readBuf := make([]byte, SIZE)
-	read, _ := buf.Read(readBuf)
+	read := buf.Read(readBuf)
 	if read != 0 {
 		t.Errorf("Expected read size 0, got %d", read)
 	}
@@ -63,27 +63,27 @@ func TestRead(t *testing.T) {
 	buf.Write(writeTwo)
 
 	// Read first chunk of first write.
-	read, _ = buf.Read(readBuf)
+	read = buf.Read(readBuf)
 	if read != READ_LEN || !bytes.Equal(readBuf[:READ_LEN], writeOne[:READ_LEN]) {
 		t.Errorf("First read failed, expected %d bytes, got %d", READ_LEN, read)
 	}
 
 	// Read remaining chunk of first write.
 	readBuf = make([]byte, READ_LEN)
-	read, _ = buf.Read(readBuf)
+	read = buf.Read(readBuf)
 	if read != WRITE_LEN-READ_LEN || !bytes.Equal(readBuf[:WRITE_LEN-READ_LEN], writeOne[READ_LEN:]) {
 		t.Errorf("Second read failed, expected %d bytes, got %d", WRITE_LEN-READ_LEN, read)
 	}
 
 	// Read first chunk of second write.
-	read, _ = buf.Read(readBuf)
+	read = buf.Read(readBuf)
 	if read != READ_LEN || !bytes.Equal(readBuf[:READ_LEN], writeTwo[:READ_LEN]) {
 		t.Errorf("Third read failed, expected %d bytes, got %d", READ_LEN, read)
 	}
 
 	// Read with empty buffer returns zero.
 	empty := make([]byte, 0)
-	read, _ = buf.Read(empty)
+	read = buf.Read(empty)
 	if read != 0 {
 		t.Errorf("Expected read size 0, got %d", read)
 	}
@@ -95,7 +95,7 @@ func TestWrite(t *testing.T) {
 	const WRITE_LEN = 1024
 
 	data := bytes.Repeat([]byte{0xef}, WRITE_LEN)
-	written, _ := buf.Write(data)
+	written := buf.Write(data)
 	if written != WRITE_LEN {
 		t.Errorf("Expected written size %d, got %d", WRITE_LEN, written)
 	}

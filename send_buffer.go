@@ -26,24 +26,24 @@ func (sb *SendBuffer) IsEmpty() bool {
 	return len(sb.pending) == 0
 }
 
-func (sb *SendBuffer) Write(data []byte) (int, error) {
+func (sb *SendBuffer) Write(data []byte) int {
 	available := sb.Available()
 	if len(data) <= available {
 		sb.pending = append(sb.pending, data)
-		return len(data), nil
+		return len(data)
 	} else {
 		sb.pending = append(sb.pending, data[:available])
-		return available, nil
+		return available
 	}
 }
 
-func (sb *SendBuffer) Read(buf []byte) (int, error) {
+func (sb *SendBuffer) Read(buf []byte) int {
 	if len(buf) == 0 {
-		return 0, nil
+		return 0
 	}
 
 	if len(sb.pending) == 0 {
-		return 0, nil
+		return 0
 	}
 
 	data := sb.pending[0]
@@ -57,5 +57,5 @@ func (sb *SendBuffer) Read(buf []byte) (int, error) {
 		sb.offset += n
 	}
 
-	return n, nil
+	return n
 }

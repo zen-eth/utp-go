@@ -3,6 +3,8 @@ package utp_go
 import (
 	"math"
 	"time"
+
+	"github.com/valyala/fastrand"
 )
 
 // wrapCompareLess compares if lhs is less than rhs, taking wrapping into account.
@@ -105,7 +107,7 @@ func maxInt64(a, b int64) int64 {
 	return b
 }
 
-func clampUint32(value, min, max uint32) uint32 {
+func ClampUint32(value, min, max uint32) uint32 {
 	if value < min {
 		return min
 	}
@@ -115,14 +117,24 @@ func clampUint32(value, min, max uint32) uint32 {
 	return value
 }
 
-func nowMicro() uint32 {
+func NowMicro() uint32 {
 	return uint32(time.Now().UnixMicro())
 }
 
-func duration_between(earlier uint32, later uint32) time.Duration {
+func DurationBetween(earlier uint32, later uint32) time.Duration {
 	if later < earlier {
 		return time.Duration(math.MaxUint32 - earlier + later)
 	} else {
 		return time.Duration(later - earlier)
 	}
+}
+
+var randGenerator = fastrand.RNG{}
+
+func RandomUint32() uint32 {
+	return randGenerator.Uint32()
+}
+
+func RandomUint16() uint16 {
+	return uint16(randGenerator.Uint32n(65535))
 }

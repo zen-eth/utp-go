@@ -2,8 +2,6 @@ package utp_go
 
 import (
 	"errors"
-
-	"github.com/optimism-java/utp-go/rs"
 )
 
 type ReceiveBuffer struct {
@@ -45,9 +43,9 @@ func (rb *ReceiveBuffer) WasWritten(seqNum uint16) bool {
 	return exists || (seqNum >= rb.initSeqNum && seqNum < rb.initSeqNum+rb.consumed)
 }
 
-func (rb *ReceiveBuffer) Read(buf []byte) (int, error) {
+func (rb *ReceiveBuffer) Read(buf []byte) int {
 	if len(buf) == 0 {
-		return 0, nil
+		return 0
 	}
 
 	n := minInt(len(buf), rb.offset)
@@ -57,7 +55,7 @@ func (rb *ReceiveBuffer) Read(buf []byte) (int, error) {
 	copy(rb.buf, rb.buf[n:n+remaining])
 	rb.offset = remaining
 
-	return n, nil
+	return n
 }
 
 func (rb *ReceiveBuffer) Write(data []byte, seqNum uint16) error {
@@ -94,7 +92,7 @@ func (rb *ReceiveBuffer) AckNum() uint16 {
 	return rb.initSeqNum + rb.consumed
 }
 
-func (rb *ReceiveBuffer) SelectiveAck() *rs.SelectiveAck {
+func (rb *ReceiveBuffer) SelectiveAck() *SelectiveAck {
 	if len(rb.pending) == 0 {
 		return nil
 	}
@@ -111,5 +109,5 @@ func (rb *ReceiveBuffer) SelectiveAck() *rs.SelectiveAck {
 		next++
 	}
 
-	return rs.NewSelectiveAck(acked)
+	return NewSelectiveAck(acked)
 }

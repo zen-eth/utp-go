@@ -28,7 +28,7 @@ func TestIterator(t *testing.T) {
 	prop := func(start, end uint16) bool {
 		rangeInclusive := NewCircularRangeInclusive(start, end)
 
-		var len int
+		var length int
 		expectedIdx := start
 		for {
 			idx, ok := rangeInclusive.Next()
@@ -40,7 +40,7 @@ func TestIterator(t *testing.T) {
 				return false
 			}
 			expectedIdx++
-			len++
+			length++
 		}
 
 		var expectedLen int
@@ -49,8 +49,8 @@ func TestIterator(t *testing.T) {
 		} else {
 			expectedLen = int(65535-start) + int(end) + 2
 		}
-		if len != expectedLen {
-			t.Errorf("Expected length %v, got %v", expectedLen, len)
+		if length != expectedLen {
+			t.Errorf("Expected length %v, got %v", expectedLen, length)
 			return false
 		}
 

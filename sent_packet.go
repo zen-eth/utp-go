@@ -4,8 +4,6 @@ import (
 	"errors"
 	"math"
 	"time"
-
-	"github.com/optimism-java/utp-go/rs"
 )
 
 const LOSS_THRESHOLD = 3
@@ -17,13 +15,13 @@ var ErrSentPacketMarkLost = errors.New("lost packet was previously sent")
 
 type LostPacket struct {
 	SeqNum     uint16
-	PacketType rs.PacketType
+	PacketType PacketType
 	Data       []byte
 }
 
 type SentPacket struct {
 	seqNum          uint16
-	packetType      rs.PacketType
+	packetType      PacketType
 	data            []byte
 	transmission    time.Time
 	retransmissions []time.Time
@@ -129,7 +127,7 @@ func (s *SentPackets) LostPackets() []*LostPacket {
 
 func (s *SentPackets) OnTransmit(
 	seqNum uint16,
-	packetType rs.PacketType,
+	packetType PacketType,
 	data []byte,
 	dataLen uint32,
 	now time.Time,
@@ -177,7 +175,7 @@ func (s *SentPackets) OnTransmit(
 
 func (s *SentPackets) OnAck(
 	ackNum uint16,
-	selectiveAck *rs.SelectiveAck,
+	selectiveAck *SelectiveAck,
 	delay time.Duration,
 	now time.Time,
 ) (CircularRangeInclusive, []uint16, error) {
@@ -214,7 +212,7 @@ func (s *SentPackets) OnAck(
 
 func (s *SentPackets) OnAckNum(
 	ackNum uint16,
-	selectiveAck *rs.SelectiveAck,
+	selectiveAck *SelectiveAck,
 	delay time.Duration,
 	now time.Time,
 ) error {
@@ -245,7 +243,7 @@ func (s *SentPackets) OnAckNum(
 
 func (s *SentPackets) OnSelectiveAck(
 	ackNum uint16,
-	selectiveAck *rs.SelectiveAck,
+	selectiveAck *SelectiveAck,
 	delay time.Duration,
 	now time.Time,
 ) error {

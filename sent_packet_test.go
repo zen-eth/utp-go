@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/optimism-java/utp-go/rs"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
@@ -29,7 +28,7 @@ func TestOnTransmitInitial(t *testing.T) {
 	data := []byte{0}
 	length := uint32(len(data))
 	now := time.Now()
-	sentPackets.OnTransmit(seqNum, rs.Data, data, length, now)
+	sentPackets.OnTransmit(seqNum, ST_DATA, data, length, now)
 
 	if len(sentPackets.packets) != 1 {
 		t.Errorf("expected 1 packet, got %d", len(sentPackets.packets))
@@ -65,8 +64,8 @@ func TestOnTransmitRetransmit(t *testing.T) {
 	first := time.Now()
 	second := time.Now()
 
-	sentPackets.OnTransmit(seqNum, rs.Data, data, length, first)
-	sentPackets.OnTransmit(seqNum, rs.Data, data, length, second)
+	sentPackets.OnTransmit(seqNum, ST_DATA, data, length, first)
+	sentPackets.OnTransmit(seqNum, ST_DATA, data, length, second)
 
 	if len(sentPackets.packets) != 1 {
 		t.Errorf("expected 1 packet, got %d", len(sentPackets.packets))
@@ -111,7 +110,7 @@ func TestOnTransmitOutOfOrder(t *testing.T) {
 		}
 	}()
 
-	sentPackets.OnTransmit(outOfOrderSeqNum, rs.Data, data, length, now)
+	sentPackets.OnTransmit(outOfOrderSeqNum, ST_DATA, data, length, now)
 }
 
 func TestOnSelectiveAck(t *testing.T) {
@@ -137,7 +136,7 @@ func TestOnSelectiveAck(t *testing.T) {
 	for i := 0; i < COUNT; i++ {
 		now := time.Now()
 		seqNum := sentPackets.NextSeqNum()
-		sentPackets.OnTransmit(seqNum, rs.Data, data, length, now)
+		sentPackets.OnTransmit(seqNum, ST_DATA, data, length, now)
 	}
 
 	// Create selective ACK
@@ -147,7 +146,7 @@ func TestOnSelectiveAck(t *testing.T) {
 			acked[i] = true
 		}
 	}
-	selectiveAck := rs.NewSelectiveAck(acked)
+	selectiveAck := NewSelectiveAck(acked)
 
 	// Process ACK
 	now := time.Now()
@@ -192,7 +191,7 @@ func TestDetectLostPackets(t *testing.T) {
 	for i := 0; i < COUNT; i++ {
 		now := time.Now()
 		seqNum := sentPackets.NextSeqNum()
-		sentPackets.OnTransmit(seqNum, rs.Data, data, length, now)
+		sentPackets.OnTransmit(seqNum, ST_DATA, data, length, now)
 
 		if i >= START {
 			err := sentPackets.Ack(seqNum, DELAY, now)
@@ -232,7 +231,7 @@ func TestAck(t *testing.T) {
 	data := []byte{0}
 	length := uint32(len(data))
 	now := time.Now()
-	sentPackets.OnTransmit(seqNum, rs.Data, data, length, now)
+	sentPackets.OnTransmit(seqNum, ST_DATA, data, length, now)
 
 	// Artificially insert packet into lost packets
 	sentPackets.lostPackets = append(sentPackets.lostPackets, seqNum)
@@ -282,7 +281,7 @@ func TestAckPriorUnacked(t *testing.T) {
 	for i := 0; i < COUNT; i++ {
 		now := time.Now()
 		seqNum := sentPackets.NextSeqNum()
-		sentPackets.OnTransmit(seqNum, rs.Data, data, length, now)
+		sentPackets.OnTransmit(seqNum, ST_DATA, data, length, now)
 	}
 
 	// Verify test preconditions
