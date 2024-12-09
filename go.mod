@@ -1,6 +1,6 @@
 module github.com/optimism-java/utp-go
 
-go 1.22.7
+go 1.23.1
 
 require (
 	github.com/ethereum/go-ethereum v1.14.11

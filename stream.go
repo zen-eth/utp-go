@@ -3,6 +3,7 @@ package utp_go
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/log"
@@ -20,10 +21,11 @@ type UtpStream struct {
 	cid          *ConnectionId
 	reads        chan *ReadOrWriteResult
 	writes       chan *QueuedWrite
-	streamEvent  chan StreamEvent
+	streamEvents chan *StreamEvent
 	shutdown     bool
 	shutdownCh   chan struct{}
 	connHandle   *sync.WaitGroup
+	conn         *Connection
 }
 
 func NewUtpStream(
@@ -31,14 +33,11 @@ func NewUtpStream(
 	cid *ConnectionId,
 	config *ConnectionConfig,
 	syn *Packet,
-	socketEvents chan<- SocketEvent,
-	streamEvents chan StreamEvent,
+	socketEvents chan *SocketEvent,
+	streamEvents chan *StreamEvent,
 	connected chan error,
 ) *UtpStream {
-	reads := make(chan *ReadOrWriteResult, 10)
-	writes := make(chan *QueuedWrite, 10)
-	shutdownCh := make(chan struct{}, 1)
-
+	log.Debug("new a utp stream", "dst.peer", cid.Peer, "dst.send", cid.Send, "dst.recv", cid.Recv)
 	connHandle := &sync.WaitGroup{}
 	connHandle.Add(1)
 	streamCtx, cancel := context.WithCancel(ctx)
@@ -47,27 +46,30 @@ func NewUtpStream(
 		streamCtx:    streamCtx,
 		streamCancel: cancel,
 		cid:          cid,
-		reads:        reads,
-		writes:       writes,
-		streamEvent:  streamEvents,
+		reads:        make(chan *ReadOrWriteResult, 10),
+		writes:       make(chan *QueuedWrite, 1),
+		streamEvents: streamEvents,
 		connHandle:   connHandle,
+		shutdownCh:   make(chan struct{}, 1),
 	}
 
-	conn := NewConnection(streamCtx, cid, config, syn, connected, socketEvents, reads)
+	utpStream.conn = NewConnection(streamCtx, cid, config, syn, connected, socketEvents, utpStream.reads)
 
-	go func(utpStream *UtpStream) {
-		defer connHandle.Done()
-		err := conn.EventLoop(streamEvents, writes, shutdownCh)
-		if err != nil {
-			log.Error("utp stream evenLoop has error and return", "err", err)
-		}
-
-	}(utpStream)
+	go utpStream.start()
 	return utpStream
 }
 
 func (s *UtpStream) Cid() *ConnectionId {
 	return s.cid
+}
+
+func (s *UtpStream) start() {
+	defer s.connHandle.Done()
+
+	err := s.conn.EventLoop(s)
+	if err != nil {
+		log.Error("utp stream evenLoop has error and return", "err", err)
+	}
 }
 
 func (s *UtpStream) ReadToEOF(ctx context.Context, buf *[]byte) (int, error) {
@@ -76,13 +78,16 @@ func (s *UtpStream) ReadToEOF(ctx context.Context, buf *[]byte) (int, error) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Error("ctx has been canceled", "err", ctx.Err(), "n", n)
 			return n, ctx.Err()
 		case <-s.streamCtx.Done():
+			log.Error("streamCtx has been canceled", "err", s.streamCtx.Err(), "n", n)
 			return 0, s.streamCtx.Err()
 		case res, ok := <-s.reads:
 			if !ok {
 				return n, nil
 			}
+			log.Debug("read a new buf", "len", len(res.Data))
 			if len(res.Data) == 0 {
 				return n, nil
 			}
@@ -98,7 +103,15 @@ func (s *UtpStream) Write(ctx context.Context, buf []byte) (int, error) {
 		return 0, ErrNotConnected
 	}
 	resCh := make(chan *ReadOrWriteResult, 1)
-	s.writes <- &QueuedWrite{buf, 0, resCh}
+	select {
+	case s.writes <- &QueuedWrite{buf, 0, resCh}:
+		log.Debug("created a new queued write to writes channel",
+			"dst.peer", s.cid.Peer,
+			"buf.len", len(buf),
+			"len(s.writes)", len(s.writes),
+			"ptr(s)", fmt.Sprintf("%p", s),
+			"ptr(writes)", fmt.Sprintf("%p", s.writes))
+	}
 
 	var err error
 	var writtenLen int
@@ -121,6 +134,6 @@ func (s *UtpStream) Close() {
 	s.connHandle.Wait()
 	close(s.writes)
 	close(s.reads)
-	close(s.streamEvent)
+	close(s.streamEvents)
 
 }

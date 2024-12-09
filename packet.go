@@ -3,7 +3,6 @@ package utp_go
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"time"
 )
 
@@ -28,11 +27,14 @@ const (
 )
 
 var (
-	ErrInvalidHeaderSize    = errors.New("invalid header size")
-	ErrInvalidPacketVersion = errors.New("invalid packet version")
-	ErrInvalidPacketType    = errors.New("invalid packet type")
-	ErrInvalidExtensionType = errors.New("invalid extension type")
-	ErrPacketTooShort       = errors.New("packet too short for selective ack extension")
+	ErrInvalidHeaderSize           = errors.New("invalid header size")
+	ErrInvalidPacketVersion        = errors.New("invalid packet version")
+	ErrInvalidPacketType           = errors.New("invalid packet type")
+	ErrInvalidExtensionType        = errors.New("invalid extension type")
+	ErrInsufficientLen             = errors.New("insufficient length for extension")
+	ErrPacketTooShort              = errors.New("packet too short for selective ack extension")
+	ErrInsufficientSelectiveAckLen = errors.New("insufficient length for selective ACK")
+	ErrInvalidSelectiveAckLen      = errors.New("invalid length for selective ACK")
 )
 
 type PacketType byte
@@ -57,10 +59,7 @@ type PacketHeaderV1 struct {
 }
 
 func (h *PacketHeaderV1) encodeTypeVer() byte {
-	typeVer := byte(0)
-	typeOrd := byte(h.PacketType)
-	typeVer = (typeVer & 0xf0) | (h.Version & 0xf)
-	typeVer = (typeVer & 0xf) | (typeOrd >> 4)
+	typeVer := byte(h.PacketType)<<4 | h.Version
 	return typeVer
 }
 
@@ -82,12 +81,15 @@ func DecodePacketHeader(value []byte) (*PacketHeaderV1, error) {
 	}
 
 	packetType := value[0] >> 4
-	packetTypeVal := PacketType(binary.BigEndian.Uint16([]byte{packetType}))
+	packetTypeVal := PacketType(packetType)
+	if err := packetTypeVal.Check(); err != nil {
+		return nil, err
+	}
 
 	version := value[0] & 0x0F
-	versionVal := uint8(binary.BigEndian.Uint16([]byte{version}))
+	versionVal := version
 
-	extension := byte(binary.BigEndian.Uint16(value[1:2]))
+	extension := value[1]
 
 	connID := binary.BigEndian.Uint16(value[2:4])
 	tsMicros := binary.BigEndian.Uint32(value[4:8])
@@ -167,10 +169,10 @@ func (s *SelectiveAck) Encode() []byte {
 // DecodeSelectiveAck decodes a byte slice into a SelectiveAck
 func DecodeSelectiveAck(data []byte) (*SelectiveAck, error) {
 	if len(data) < 4 {
-		return nil, errors.New("insufficient length for selective ACK")
+		return nil, ErrInsufficientSelectiveAckLen
 	}
 	if len(data)%4 != 0 {
-		return nil, errors.New("invalid length for selective ACK")
+		return nil, ErrInvalidSelectiveAckLen
 	}
 
 	acked := make([][SELECTIVE_ACK_BITS]bool, len(data)/4)
@@ -227,73 +229,134 @@ func (p *Packet) Encode() []byte {
 	return bytes
 }
 
-func (p *Packet) Decode(b []byte) error {
+func DecodePacket(b []byte) (*Packet, error) {
+	var p Packet
 	receivedBytesLength := len(b)
 	if receivedBytesLength < MINIMAL_HEADER_SIZE {
-		return ErrInvalidHeaderSize
+		return nil, ErrInvalidHeaderSize
 	}
 
-	version := b[0] & 0xf
-	if version != PROTOCOL_VERSION_ONE {
-		return ErrInvalidPacketVersion
-	}
-	kind := PacketType(b[0] >> 4)
-	if err := kind.Check(); err != nil {
-		return err
-	}
-	extensionByte := b[1]
-	if extensionByte != 0 && extensionByte != 1 {
-		return ErrInvalidExtensionType
-	}
-
-	header := &PacketHeaderV1{
-		PacketType:    kind,
-		Version:       version,
-		Extension:     extensionByte,
-		ConnectionId:  binary.BigEndian.Uint16(b[2:4]),
-		Timestamp:     int64(binary.BigEndian.Uint32(b[4:8])),
-		TimestampDiff: binary.BigEndian.Uint32(b[8:12]),
-		WndSize:       binary.BigEndian.Uint32(b[12:16]),
-		SeqNum:        binary.BigEndian.Uint16(b[16:18]),
-		AckNum:        binary.BigEndian.Uint16(b[18:20]),
-	}
-
-	var body []byte
-	if extensionByte == 0 {
-		if receivedBytesLength == MINIMAL_HEADER_SIZE {
-			body = []byte{}
-		} else {
-			body = b[MINIMAL_HEADER_SIZE:]
-		}
-		p.Header = header
-		p.Eack = nil
-		p.Body = body
-		return nil
-	}
-	if receivedBytesLength < MINIMAL_HEADER_SIZE_WITH_SELECTIVE_ACK {
-		return ErrPacketTooShort
-	}
-	nextExtension := b[20]
-	extLength := b[21]
-
-	if nextExtension != 0 || extLength != 4 {
-		return fmt.Errorf("bad format of selective ack extension: extension=%d, len=%d", nextExtension, extLength)
-	}
-
-	extension, err := DecodeSelectiveAck(b[22:26])
+	header, err := DecodePacketHeader(b[:MINIMAL_HEADER_SIZE])
 	if err != nil {
-		return fmt.Errorf("invalid length of selective ack extension")
+		return nil, err
 	}
 
-	if receivedBytesLength == MINIMAL_HEADER_SIZE_WITH_SELECTIVE_ACK {
-		body = []byte{}
+	extensions, extensionsLen, err := DecodeRawExtensions(header.Extension, b[MINIMAL_HEADER_SIZE:])
+	if err != nil {
+		return nil, err
+	}
+
+	var extension ExtensionData
+	for _, extensionData := range extensions {
+		if extensionData.extension == 1 {
+			extension = extensionData
+		}
+	}
+	var ack *SelectiveAck
+	if len(extension.payload) != 0 {
+		if ack, err = DecodeSelectiveAck(extension.payload); err != nil {
+			return nil, err
+		}
+	}
+
+	payloadStartIndex := MINIMAL_HEADER_SIZE + extensionsLen
+	var payload []byte
+	if len(b) == payloadStartIndex {
+		payload = make([]byte, 0)
 	} else {
-		body = b[MINIMAL_HEADER_SIZE_WITH_SELECTIVE_ACK:]
+		payload = b[payloadStartIndex:]
+	}
+	if header.PacketType == ST_DATA && len(payload) == 0 {
+		return nil, ErrEmptyDataPayload
 	}
 	p.Header = header
-	p.Eack = extension
-	p.Body = body
-	return nil
+	p.Eack = ack
+	p.Body = payload
+	return &p, nil
+	//var body []byte
+	//if header.Extension == 0 {
+	//	if receivedBytesLength == MINIMAL_HEADER_SIZE {
+	//		body = []byte{}
+	//	} else {
+	//		body = b[MINIMAL_HEADER_SIZE:]
+	//	}
+	//	p.Header = header
+	//	p.Eack = nil
+	//	p.Body = body
+	//	return &p, nil
+	//}
+	//if receivedBytesLength < MINIMAL_HEADER_SIZE_WITH_SELECTIVE_ACK {
+	//	return nil, ErrPacketTooShort
+	//}
+	//nextExtension := b[20]
+	//extLength := b[21]
+	//
+	//if nextExtension != 0 || extLength != 4 {
+	//	return nil, fmt.Errorf("bad format of selective ack extension: extension=%d, len=%d", nextExtension, extLength)
+	//}
+	//
+	//extension, err := DecodeSelectiveAck(b[22:26])
+	//if err != nil {
+	//	return nil, ErrInvalidSelectiveAckLen
+	//}
+
+	//if receivedBytesLength == MINIMAL_HEADER_SIZE_WITH_SELECTIVE_ACK {
+	//	body = []byte{}
+	//} else {
+	//	body = b[MINIMAL_HEADER_SIZE_WITH_SELECTIVE_ACK:]
+	//}
+	//p.Header = header
+	//p.Eack = extension
+	//p.Body = body
+	//return &p, nil
+}
+
+type ExtensionData struct {
+	extension byte
+	payload   []byte
+}
+
+func DecodeRawExtensions(firstExt byte, data []byte) ([]ExtensionData, int, error) {
+	ext := firstExt
+	index := 0
+	extensions := make([]ExtensionData, 0)
+
+	for ext != 0 {
+		// Check if enough data for header (2 bytes)
+		if len(data[index:]) < 2 {
+			return nil, 0, ErrInsufficientLen
+		}
+
+		// Read next extension type
+		nextExt := data[index]
+
+		// Read extension length
+		extLen := int(data[index+1])
+
+		// Calculate start of extension data
+		extStart := index + 2
+
+		// Check if enough data for extension content
+		if len(data[extStart:]) < extLen {
+			return nil, 0, ErrInsufficientLen
+		}
+
+		// Copy extension data
+		extData := make([]byte, extLen)
+		copy(extData, data[extStart:extStart+extLen])
+
+		// Add to extensions list
+		extensions = append(extensions, ExtensionData{
+			extension: ext,
+			payload:   extData,
+		})
+
+		// Move to next extension
+		ext = nextExt
+		index = extStart + extLen
+	}
+
+	return extensions, index, nil
 }
 
 type PacketBuilder struct {

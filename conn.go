@@ -109,7 +109,7 @@ func FromConnConfig(config *ConnectionConfig) *CtrlConfig {
 type QueuedWrite struct {
 	data     []byte
 	written  int
-	resultCh chan<- *ReadOrWriteResult
+	resultCh chan *ReadOrWriteResult
 }
 
 type ReadOrWriteResult struct {
@@ -126,7 +126,7 @@ type Connection struct {
 	endpoint       *Endpoint
 	peerTsDiff     time.Duration
 	peerRecvWindow uint32
-	socketEvents   chan<- SocketEvent
+	socketEvents   chan *SocketEvent
 	unacked        *DelayMap[*Packet]
 	reads          chan *ReadOrWriteResult
 	readable       chan struct{}
@@ -141,7 +141,7 @@ func NewConnection(
 	config *ConnectionConfig,
 	syn *Packet,
 	connected chan error,
-	socketEvents chan<- SocketEvent,
+	socketEvents chan *SocketEvent,
 	reads chan *ReadOrWriteResult,
 ) *Connection {
 	var endpoint *Endpoint
@@ -182,28 +182,27 @@ func NewConnection(
 		unacked:        NewDelayMap[*Packet](),
 		reads:          reads,
 		readable:       make(chan struct{}, 10),
-		pendingWrites:  make([]*QueuedWrite, 10),
+		pendingWrites:  make([]*QueuedWrite, 0),
 		writable:       make(chan struct{}, 10),
 		latestTimeout:  nil,
 	}
 }
 
-func (c *Connection) EventLoop(
-	streamEvents <-chan StreamEvent,
-	writes <-chan *QueuedWrite,
-	shutdown <-chan struct{},
-) error {
+func (c *Connection) EventLoop(stream *UtpStream) error {
 	log.Debug("uTP conn starting", "peer", c.cid.Peer)
 
 	// Initialize connection based on endpoint type
 	if c.endpoint.Type == Initiator {
 		synSeqNum := c.endpoint.SynNum
 		synPkt := c.SynPacket(synSeqNum)
-		c.socketEvents <- SocketEvent{
+		select {
+		case c.socketEvents <- &SocketEvent{
 			Type:         Outgoing,
 			Packet:       synPkt,
 			ConnectionId: c.cid,
+		}:
 		}
+		log.Debug("a initial syn packet", "peer", c.cid.Peer)
 		c.unacked.Put(synSeqNum, synPkt, c.config.InitialTimeout)
 
 		c.endpoint.Attempts = 1
@@ -212,7 +211,8 @@ func (c *Connection) EventLoop(
 		synAck := c.endpoint.SynAck
 
 		statePacket := c.StatePacket()
-		c.socketEvents <- SocketEvent{
+		log.Debug("a initial state packet", "peer", c.cid.Peer)
+		c.socketEvents <- &SocketEvent{
 			Type:         Outgoing,
 			Packet:       statePacket,
 			ConnectionId: c.cid,
@@ -243,27 +243,34 @@ func (c *Connection) EventLoop(
 	}
 	defer idleTimer.Stop()
 
+	log.Debug("stream ptr", "dst.peer", c.cid.Peer, "ptr(stream)", fmt.Sprintf("%p", stream), "ptr(stream.writes)", fmt.Sprintf("%p", stream.writes))
+
 	for {
+		log.Debug("conn event looping...", "dst.peer", c.cid.Peer)
 		select {
-		case event := <-streamEvents:
+		case event := <-stream.streamEvents:
 			if event.Type == StreamIncoming {
+				log.Debug("incoming packet", "src.peer", c.cid.Peer, "buf.len", len(event.Packet.Body), "packetType", event.Packet.Header.PacketType)
 				// Reset idle timeout
 				resetIdleTimer()
 				c.OnPacket(event.Packet, time.Now())
 			} else if event.Type == StreamShutdown {
 				shuttingDown = true
 			}
-		case write, ok := <-writes:
+		case write, ok := <-stream.writes:
+			log.Debug("get queued write from writes", "dst.peer", c.cid.Peer, "content", len(write.data))
 			if !ok || shuttingDown {
-				continue
+				break
 			}
 			resetIdleTimer()
 			c.OnWrite(write.data, write.resultCh)
 
 		case <-c.readable:
+			log.Debug("has data to continually reading")
 			c.ProcessReads()
 
 		case <-c.writable:
+			log.Debug("has data to continually writing")
 			c.ProcessWrites(time.Now())
 
 		// todo case handle unacked timeout
@@ -277,12 +284,13 @@ func (c *Connection) EventLoop(
 			c.OnTimeout(timeoutPkt, time.Now())
 
 		case <-idleTimer.C:
+			log.Debug("idle timeout, closing...")
 			if c.state.stateType != ConnClosed {
 				//unacked := c.unacked.Keys()
 				//log.Warn().Interface("unacked", unacked).Msg("idle timeout expired, closing...")
 				c.state.Err = ErrTimedOut
 			}
-		case <-shutdown:
+		case <-stream.shutdownCh:
 			if !shuttingDown {
 				log.Debug("uTP conn initiating shutdown...")
 				shuttingDown = true
@@ -293,6 +301,7 @@ func (c *Connection) EventLoop(
 				shuttingDown = true
 			}
 		}
+		log.Debug("select code block end...")
 
 		if shuttingDown && c.state.stateType != ConnClosed {
 			c.Shutdown()
@@ -303,7 +312,7 @@ func (c *Connection) EventLoop(
 			c.ProcessReads()
 			c.ProcessWrites(time.Now())
 
-			c.socketEvents <- SocketEvent{
+			c.socketEvents <- &SocketEvent{
 				Type:         SocketShutdown,
 				ConnectionId: c.cid,
 			}
@@ -313,6 +322,7 @@ func (c *Connection) EventLoop(
 }
 
 func (c *Connection) Shutdown() {
+	log.Debug("will shutdown conn", "dst.peer", c.cid.Peer)
 	switch c.state.stateType {
 	case ConnConnecting:
 		c.state.stateType = ConnClosed
@@ -377,14 +387,17 @@ func (c *Connection) ProcessWrites(now time.Time) {
 	var sentPackets *SentPackets
 	var recvBuf *ReceiveBuffer
 
+	log.Debug("processing queuedWrites")
 	switch c.state.stateType {
 	case ConnConnecting:
+		log.Debug("waiting for connection to be established")
 		return
 	case ConnConnected:
 		sendBuf = c.state.SendBuf
 		sentPackets = c.state.SentPackets
 		recvBuf = c.state.RecvBuf
 	case ConnClosed:
+		log.Debug("connection is closed, no writes to process")
 		result := &ReadOrWriteResult{
 			Err: c.state.Err,
 		}
@@ -402,6 +415,7 @@ func (c *Connection) ProcessWrites(now time.Time) {
 	var payloads [][]byte
 
 	for windowSize > 0 {
+		log.Debug("has enough window size to send a packet data in SendBuffer", "windowSize", windowSize)
 		maxDataSize := minUint32(windowSize, uint32(c.config.MaxPacketSize-64))
 		data := make([]byte, maxDataSize)
 		n := sendBuf.Read(data)
@@ -459,7 +473,7 @@ func (c *Connection) ProcessWrites(now time.Time) {
 	}
 }
 
-func (c *Connection) OnWrite(data []byte, receiver chan<- *ReadOrWriteResult) {
+func (c *Connection) OnWrite(data []byte, receiver chan *ReadOrWriteResult) {
 	writeReq := &QueuedWrite{
 		data:     data,
 		written:  0,
@@ -473,11 +487,13 @@ func (c *Connection) OnWrite(data []byte, receiver chan<- *ReadOrWriteResult) {
 	case ConnConnected:
 		if c.state.closing != nil {
 			if c.state.closing.LocalFin == nil && c.state.closing.RemoteFin != nil {
+				log.Debug("append a queuedWrite to pending writes")
 				c.pendingWrites = append(c.pendingWrites, writeReq)
 			} else {
 				receiver <- &ReadOrWriteResult{Len: 0}
 			}
 		} else {
+			log.Debug("append a queuedWrite to pending writes")
 			c.pendingWrites = append(c.pendingWrites, writeReq)
 		}
 
@@ -576,7 +592,7 @@ func (c *Connection) OnTimeout(packet *Packet, now time.Time) {
 				// Re-send SYN packet
 				synPacket := c.SynPacket(seq)
 				select {
-				case c.socketEvents <- SocketEvent{
+				case c.socketEvents <- &SocketEvent{
 					Type:         Outgoing,
 					Packet:       synPacket,
 					ConnectionId: c.cid,
@@ -622,7 +638,7 @@ func (c *Connection) OnTimeout(packet *Packet, now time.Time) {
 }
 
 func (c *Connection) OnPacket(packet *Packet, now time.Time) {
-	//log.Trace().Interface("packet", packet).Msg("Received packet")
+	log.Debug("Received packet", "packet.type", packet.Header.PacketType, "packet.data.len", len(packet.Body))
 	nowMicros := time.Now().UnixMicro()
 	c.peerRecvWindow = packet.Header.WndSize
 
@@ -674,7 +690,7 @@ func (c *Connection) OnPacket(packet *Packet, now time.Time) {
 				ConnectionId: c.cid,
 			}
 			select {
-			case c.socketEvents <- event:
+			case c.socketEvents <- &event:
 			}
 		}
 	}
@@ -974,7 +990,7 @@ func (c *Connection) Transmit(packet *Packet, now time.Time) {
 		length = uint32(len(packet.Body))
 	}
 
-	log.Trace("will write",
+	log.Debug("will write",
 		"cid", packet.Header.ConnectionId,
 		"packetType", packet.Header.PacketType,
 		"seqNum", packet.Header.SeqNum,
@@ -989,7 +1005,7 @@ func (c *Connection) Transmit(packet *Packet, now time.Time) {
 		Packet:       packet,
 		ConnectionId: c.cid,
 	}
-	c.socketEvents <- outbound
+	c.socketEvents <- &outbound
 
 	//select {
 	//case :

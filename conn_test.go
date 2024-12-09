@@ -16,7 +16,7 @@ const (
 
 func CreateTestConnection(endpoint Endpoint) *Connection {
 	// Create channels
-	socketEvents := make(chan SocketEvent, 100)
+	socketEvents := make(chan *SocketEvent, 100)
 	reads := make(chan *ReadOrWriteResult, 100)
 
 	// Create peer address
