@@ -3,7 +3,7 @@ package integrated
 import (
 	"encoding/hex"
 	"errors"
-	"os"
+	"fmt"
 	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/log"
@@ -24,6 +24,7 @@ func (p *MockConnectedPeer) Hash() string {
 }
 
 type MockUdpSocket struct {
+	logger   log.Logger
 	sendCh   chan []byte
 	recvCh   chan []byte
 	onlyPeer utp.ConnectionPeer
@@ -40,14 +41,14 @@ func (s *MockUdpSocket) ReadFrom(b []byte) (int, utp.ConnectionPeer, error) {
 		if len(b) < len(buf) {
 			return 0, nil, ErrChClosed
 		}
-		log.Debug("read a raw packet from mocksocket", "buf", hex.EncodeToString(buf))
+		log.Debug("read a raw packet from mocksocket", "from", s.onlyPeer, "len(buf)", len(buf), "buf", hex.EncodeToString(buf))
 		copy(b[:n], buf)
 		return n, s.onlyPeer, nil
 	}
 }
 func (s *MockUdpSocket) WriteTo(b []byte, dst utp.ConnectionPeer) (int, error) {
-	if dst.Hash() == s.onlyPeer.Hash() {
-		panic("MockUdpSocket only supports Writing To one peer")
+	if dst.Hash() != s.onlyPeer.Hash() {
+		panic(fmt.Sprintf("MockUdpSocket only supports Writing To one peer: dst.peer = %s, onlyPeer = %s", dst.Hash(), s.onlyPeer.Hash()))
 	}
 	if !s.upStatus.Load() {
 		return len(b), nil
@@ -64,16 +65,16 @@ func (s *MockUdpSocket) Close() error {
 }
 
 func buildLinkPair() (*MockUdpSocket, *MockUdpSocket) {
-	handler := log.NewTerminalHandler(os.Stdout, true)
-	log.SetDefault(log.NewLogger(handler))
 	peerA, peerB := &MockConnectedPeer{name: "peerA"}, &MockConnectedPeer{name: "peerB"}
 	peerACh, peerBCh := make(chan []byte, 1), make(chan []byte, 1)
 
+	// A -> B
 	a, b := &MockUdpSocket{
 		sendCh:   peerACh,
 		recvCh:   peerBCh,
 		onlyPeer: peerB,
 	}, &MockUdpSocket{
+		// B -> A
 		sendCh:   peerBCh,
 		recvCh:   peerACh,
 		onlyPeer: peerA,

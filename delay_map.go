@@ -20,7 +20,7 @@ type delayItem[P any] struct {
 func NewDelayMap[P any]() *DelayMap[P] {
 	return &DelayMap[P]{
 		unacked:       make(map[any]*delayItem[P]),
-		itemTimeoutCh: make(chan *delayItem[P], 1),
+		itemTimeoutCh: make(chan *delayItem[P], 100),
 	}
 }
 

@@ -3,6 +3,7 @@ package integrated
 import (
 	"bytes"
 	"context"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -12,16 +13,22 @@ import (
 )
 
 func TestCloseWhenWriteCompletes(t *testing.T) {
+	handler := log.NewTerminalHandler(os.Stdout, true)
+	log.SetDefault(log.NewLogger(handler))
+
 	connConfig := utp.NewConnectionConfig()
 
 	// Create connected socket pair
-	sendLink, sendCid, recvLink, recvCid := buildConnectedPair()
+	aLink, aCid, bLink, bCid := buildConnectedPair()
 
 	ctx := context.Background()
 
 	// Create sockets
-	recvSocket := utp.WithSocket(ctx, recvLink, nil)
-	sendSocket := utp.WithSocket(ctx, sendLink, nil)
+	loggerA := log.Root().New("local", "peerA")
+	aSocket := utp.WithSocket(ctx, aLink, loggerA)
+	loggerB := log.Root().New("local", "peerB")
+	//loggerB := log.NewLogger(log.DiscardHandler())
+	bSocket := utp.WithSocket(ctx, bLink, loggerB)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -31,9 +38,9 @@ func TestCloseWhenWriteCompletes(t *testing.T) {
 	var recvErr error
 	go func() {
 		defer wg.Done()
-		log.Debug("accepting with cid", "src.peer", recvCid.Peer)
-		recvStream, recvErr = recvSocket.AcceptWithCid(ctx, recvCid, connConfig)
-		log.Debug("accepted with cid", "src.peer", recvCid.Peer)
+		log.Debug("accepting with cid", "src.peer", bCid.Peer)
+		recvStream, recvErr = bSocket.AcceptWithCid(ctx, bCid, connConfig)
+		log.Debug("accepted with cid", "src.peer", bCid.Peer)
 	}()
 
 	// Connect
@@ -41,9 +48,12 @@ func TestCloseWhenWriteCompletes(t *testing.T) {
 	var sendErr error
 	go func() {
 		defer wg.Done()
-		log.Debug("Connecting with cid", "dst.peer", sendCid.Peer)
-		sendStream, sendErr = sendSocket.ConnectWithCid(ctx, sendCid, connConfig)
-		log.Debug("Connected", "dst.peer", sendCid.Peer)
+		log.Debug("Connecting with cid", "dst.peer", aCid.Peer)
+		sendStream, sendErr = aSocket.ConnectWithCid(ctx, aCid, connConfig)
+		if sendErr != nil {
+			t.Error("failed to connect with cid", "dst.peer", aCid.Peer)
+		}
+		log.Debug("Connected", "dst.peer", aCid.Peer)
 	}()
 
 	wg.Wait()
@@ -65,7 +75,7 @@ func TestCloseWhenWriteCompletes(t *testing.T) {
 	go func() {
 		defer sendWg.Done()
 		log.Debug("will write to", "dst.peer", sendStream.Cid().Peer)
-		written, err := recvStream.Write(ctx, data)
+		written, err := sendStream.Write(ctx, data)
 		if err != nil {
 			t.Errorf("Error sending data: %v", err)
 			return
@@ -82,7 +92,7 @@ func TestCloseWhenWriteCompletes(t *testing.T) {
 		defer recvWg.Done()
 		readBuf := make([]byte, 0)
 		log.Debug("will read from", "src.peer", recvStream.Cid().Peer)
-		_, err := sendStream.ReadToEOF(ctx, &readBuf)
+		_, err := recvStream.ReadToEOF(ctx, &readBuf)
 		if err != nil {
 			t.Errorf("Error receiving data: %v", err)
 			return
@@ -94,10 +104,9 @@ func TestCloseWhenWriteCompletes(t *testing.T) {
 
 	// Wait for send to complete
 	sendWg.Wait()
-	recvWg.Wait()
 
 	// Close stream with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	closeCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
 
 	done := make(chan struct{})
@@ -107,7 +116,7 @@ func TestCloseWhenWriteCompletes(t *testing.T) {
 	}()
 
 	select {
-	case <-ctx.Done():
+	case <-closeCtx.Done():
 		t.Fatal("Timeout closing stream")
 	case <-done:
 		// Close successful

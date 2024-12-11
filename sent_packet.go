@@ -179,6 +179,7 @@ func (s *SentPackets) OnAck(
 	delay time.Duration,
 	now time.Time,
 ) (CircularRangeInclusive, []uint16, error) {
+
 	// Check if ack number is in valid range
 	seqRange := s.SeqNumRange()
 	if !seqRange.Contains(ackNum) {
@@ -279,10 +280,11 @@ func (s *SentPackets) DetectLostPackets() []uint16 {
 	var lost []uint16
 	acked := 0
 
-	start, err := s.FirstUnackedSeqNum()
+	firstUnacked, err := s.FirstUnackedSeqNum()
 	if err != nil {
 		return lost
 	}
+	start := s.SeqNumIndex(firstUnacked)
 	packets := s.packets[start:]
 
 	// Iterate in reverse order

@@ -88,21 +88,21 @@ type IncomingPacket struct {
 }
 
 type UtpSocket struct {
-	ctx             context.Context
-	cancel          context.CancelFunc
-	logger          log.Logger
-	connsMutex      sync.Mutex
-	conns           map[string]chan *StreamEvent
-	accepts         chan *Accept
-	acceptsWithCid  chan *Accept
-	socketEvents    chan *SocketEvent
-	awaitingMu      sync.Mutex
-	awaiting        map[string]*Accept
-	incomingConnsMu sync.Mutex
-	incomingConns   map[string]*IncomingPacket
-	socket          Conn
-	readNextCh      chan struct{}
-	incomingBuf     chan *IncomingPacketRaw
+	ctx              context.Context
+	cancel           context.CancelFunc
+	logger           log.Logger
+	connsMutex       sync.Mutex
+	conns            map[string]chan *StreamEvent
+	accepts          chan *Accept
+	acceptsWithCidCh chan *Accept
+	socketEvents     chan *SocketEvent
+	awaitingMu       sync.Mutex
+	awaiting         map[string]*Accept
+	incomingConnsMu  sync.Mutex
+	incomingConns    map[string]*IncomingPacket
+	socket           Conn
+	readNextCh       chan struct{}
+	incomingBuf      chan *IncomingPacketRaw
 }
 
 func Bind(network string, addr *net.UDPAddr) (Conn, error) {
@@ -120,18 +120,18 @@ func WithSocket(ctx context.Context, socket Conn, logger log.Logger) *UtpSocket 
 	}
 
 	utp := &UtpSocket{
-		ctx:            ctx,
-		cancel:         cancel,
-		logger:         logger,
-		conns:          make(map[string]chan *StreamEvent),
-		accepts:        make(chan *Accept, 1),
-		acceptsWithCid: make(chan *Accept, 1),
-		socketEvents:   make(chan *SocketEvent, 10),
-		awaiting:       make(map[string]*Accept),
-		incomingConns:  make(map[string]*IncomingPacket),
-		socket:         socket,
-		readNextCh:     make(chan struct{}, 10),
-		incomingBuf:    make(chan *IncomingPacketRaw, 10),
+		ctx:              ctx,
+		cancel:           cancel,
+		logger:           logger,
+		conns:            make(map[string]chan *StreamEvent),
+		accepts:          make(chan *Accept, 1),
+		acceptsWithCidCh: make(chan *Accept, 1),
+		socketEvents:     make(chan *SocketEvent, 10),
+		awaiting:         make(map[string]*Accept),
+		incomingConns:    make(map[string]*IncomingPacket),
+		socket:           socket,
+		readNextCh:       make(chan struct{}, 10),
+		incomingBuf:      make(chan *IncomingPacketRaw, 10),
 	}
 
 	go utp.readLoop()
@@ -142,9 +142,10 @@ func WithSocket(ctx context.Context, socket Conn, logger log.Logger) *UtpSocket 
 
 func (s *UtpSocket) readLoop() {
 	buf := make([]byte, math.MaxUint16)
-	log.Debug("utp socket readLoop start...")
+	s.logger.Debug("utp socket readLoop start...")
 	for range s.readNextCh {
 		n, from, err := s.socket.ReadFrom(buf)
+		s.logger.Debug("read data from base socket", "n", n, "from", from)
 		if netutil.IsTemporaryError(err) {
 			// Ignore temporary read errors.
 			s.logger.Debug("Temporary UDP read error", "err", err)
@@ -156,25 +157,37 @@ func (s *UtpSocket) readLoop() {
 			}
 			return
 		}
-		log.Debug("recv a packet from remote", "buf.len", n, "from", from, "buf", hex.EncodeToString(buf[:n]))
 		dstBuf := make([]byte, n)
 		copy(dstBuf, buf[:n])
+		s.logger.Debug("recv a packet from remote", "buf.len", n, "from", from, "buf", hex.EncodeToString(buf[:n]))
 		s.incomingBuf <- &IncomingPacketRaw{peer: from, payload: dstBuf}
 	}
 }
 
 func (s *UtpSocket) eventLoop() {
 	s.readNextCh <- struct{}{}
-	log.Debug("utp socket eventLoop start...")
+	s.logger.Debug("utp socket eventLoop start...")
 	for {
 		select {
 		case event := <-s.socketEvents:
-			log.Debug("a socket event should be sent to target", "event.type", event.Type, "event.cid", event.ConnectionId)
+			s.logger.Debug("a socket event should be sent to target", "event.type", event.Type, "event.cid", event.ConnectionId)
 			switch event.Type {
 			case Outgoing:
+				s.logger.Debug("Send a packet out",
+					"target.cid", event.ConnectionId,
+					"packet.type", event.Packet.Header.PacketType,
+					"packet.seqNum", event.Packet.Header.SeqNum,
+					"packet.ackNum", event.Packet.Header.AckNum,
+					"packet.body.len", len(event.Packet.Body))
 				encoded := event.Packet.Encode()
-				if _, err := s.socket.WriteTo(encoded, event.ConnectionId); err != nil {
-					log.Debug("Failed to send uTP packet",
+				var peer ConnectionPeer
+				if cid, ok := event.ConnectionId.(*ConnectionId); ok {
+					peer = cid.Peer
+				} else {
+					peer = event.ConnectionId
+				}
+				if _, err := s.socket.WriteTo(encoded, peer); err != nil {
+					s.logger.Debug("Failed to send uTP packet",
 						"error", err,
 						"cid", event.Packet.Header.ConnectionId,
 						"type", event.Packet.Header.PacketType)
@@ -182,36 +195,17 @@ func (s *UtpSocket) eventLoop() {
 				s.readNextCh <- struct{}{}
 
 			case SocketShutdown:
-				log.Debug("uTP conn shutdown", "cid.Hash", event.ConnectionId.Hash())
-				delete(s.conns, event.ConnectionId.Hash())
-			}
-		case acceptWithCid := <-s.acceptsWithCid:
-			log.Debug("get a accept event", "accept.cid.Send", acceptWithCid.cid.Send, "accept.cid.Recv", acceptWithCid.cid.Recv)
-			incomingConnsKey := acceptWithCid.cid.Hash()
+				s.logger.Debug("uTP conn shutdown", "cid.Hash", event.ConnectionId.Hash())
+				s.removeConnStream(event.ConnectionId.Hash())
 
-			if incomingConn, exists := s.incomingConns[incomingConnsKey]; exists {
-				delete(s.incomingConns, incomingConnsKey)
-				// todo handle expire
-				//delete(s.incomingConnsExpirations, incomingConnsKey)
-				synPkt := incomingConn.pkt
-				s.selectAcceptHelper(s.ctx, acceptWithCid.cid, synPkt, s.conns, acceptWithCid, s.socketEvents)
-			} else {
-				s.awaiting[incomingConnsKey] = acceptWithCid
-				// todo awaitingTimer
-				//awaitingExpirations[cidHash] = time.Now()
-				continue
 			}
-
+		case acceptWithCid := <-s.acceptsWithCidCh:
+			s.handleNewAcceptWithCidEvent(acceptWithCid)
 		case accept := <-s.accepts:
-			for cidHash, incomingAccept := range s.incomingConns {
-				delete(s.incomingConns, cidHash)
-				// todo handle expire
-				//delete(s.incomingConnsExpirations, cidHash)
-				s.selectAcceptHelper(s.ctx, incomingAccept.cid, incomingAccept.pkt, s.conns, accept, s.socketEvents)
-				break
-			}
+			s.handleNewAcceptEvent(accept)
 		case incomingRaw := <-s.incomingBuf:
 			// Handle incoming packets
+			s.logger.Debug("receive incoming packet", "peer", incomingRaw.peer)
 			packetPtr, err := DecodePacket(incomingRaw.payload)
 			if err != nil {
 				s.logger.Warn("Unable to decode uTP packet", "peer", incomingRaw.peer)
@@ -221,10 +215,9 @@ func (s *UtpSocket) eventLoop() {
 			peerInitCID := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeSendIdPeerInitiated)
 			weInitCID := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeSendIdWeInitiated)
 			accCID := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeRecvId)
-
 			// Look for existing connection
-			if connStream := s.getConnStream(accCID, weInitCID, peerInitCID); connStream != nil {
-				s.logger.Debug("get a packet from a exist conn stream channel",
+			if connStream := s.getConnStreamWithCids(accCID, weInitCID, peerInitCID); connStream != nil {
+				s.logger.Debug("receive a packet from a exist conn stream",
 					"src.peer", incomingRaw.peer,
 					"packet.type", packetPtr.Header.PacketType,
 					"packet.Data.len", len(packetPtr.Body))
@@ -235,15 +228,23 @@ func (s *UtpSocket) eventLoop() {
 			} else {
 				if packetPtr.Header.PacketType == ST_SYN {
 					cid := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeRecvId)
-					s.logger.Debug("receive a syn packet from a new conn stream", "src.peer", incomingRaw.peer, "cid.Send", cid.Send, "cid.Recv", cid.Recv)
+					s.logger.Debug("receive a syn packet from a new conn stream",
+						"src.peer", incomingRaw.peer,
+						"cid.Send", cid.Send,
+						"cid.Recv", cid.Recv,
+						"cid.hash", cid.Hash())
 					cidHash := cid.Hash()
-					if accept, exist := s.awaiting[cidHash]; exist {
+					if accept, exist := s.getAwaiting(cidHash); exist {
+						s.logger.Debug("found a accept request from awaiting map...",
+							"accept.cid.Send", accept.cid.Send, "accept.cid.Recv", accept.cid.Recv)
 						connected := make(chan error, 1)
-						stream := NewUtpStream(s.ctx, cid, accept.config, packetPtr, s.socketEvents, make(chan *StreamEvent, 10), connected)
+						newConnStream := make(chan *StreamEvent, 10)
+						s.putConnStream(cidHash, newConnStream)
+						stream := NewUtpStream(s.ctx, s.logger, cid, accept.config, packetPtr, s.socketEvents, newConnStream, connected)
 						go s.awaitConnected(stream, accept, connected)
 					} else {
-						s.incomingConns[cidHash] = &IncomingPacket{pkt: packetPtr, cid: cid}
-						// todo incomingConnsExpirations insert
+						s.logger.Debug("put a new syn packet to incomingConns...")
+						s.putIncomingConn(cidHash, &IncomingPacket{pkt: packetPtr, cid: cid})
 					}
 				} else {
 					s.logger.Debug("received uTP packet for non-existing conn",
@@ -267,7 +268,87 @@ func (s *UtpSocket) eventLoop() {
 	}
 }
 
+func (s *UtpSocket) handleNewAcceptWithCidEvent(acceptWithCid *Accept) {
+	s.logger.Debug("get a accept event with cid",
+		"accept.cid.Send", acceptWithCid.cid.Send,
+		"accept.cid.Recv",
+		acceptWithCid.cid.Recv, "accept.cid.Peer", acceptWithCid.cid.Peer,
+		"hash", acceptWithCid.cid.Hash())
+	incomingConnsKey := acceptWithCid.cid.Hash()
+
+	if incomingConn, exists := s.removeIncomingConn(incomingConnsKey); exists {
+		s.logger.Debug("conn has already accepted", "key", incomingConnsKey)
+		s.selectAcceptHelper(s.ctx, acceptWithCid.cid, incomingConn.pkt, acceptWithCid, s.socketEvents)
+	} else {
+		s.logger.Debug("will wait for the syn pkt arrive", "key", incomingConnsKey)
+		s.putAwaiting(incomingConnsKey, acceptWithCid)
+	}
+}
+
+func (s *UtpSocket) handleNewAcceptEvent(accept *Accept) {
+	incomingAccept := s.nextIncomingConn()
+	if incomingAccept != nil {
+		s.selectAcceptHelper(s.ctx, incomingAccept.cid, incomingAccept.pkt, accept, s.socketEvents)
+	} else {
+		accept.stream <- &StreamResult{
+			err: errors.New("no incoming conn"),
+		}
+	}
+}
+
+func (s *UtpSocket) getAwaiting(key string) (*Accept, bool) {
+	s.awaitingMu.Lock()
+	defer s.awaitingMu.Unlock()
+	accept, ok := s.awaiting[key]
+	return accept, ok
+}
+
+func (s *UtpSocket) putAwaiting(key string, acceptWithCid *Accept) {
+	s.awaitingMu.Lock()
+	defer s.awaitingMu.Unlock()
+	s.awaiting[key] = acceptWithCid
+	// todo awaitingTimer
+	//awaitingExpirations[cidHash] = time.Now()
+}
+
+func (s *UtpSocket) putIncomingConn(key string, incomingConn *IncomingPacket) {
+	s.incomingConnsMu.Lock()
+	defer s.incomingConnsMu.Unlock()
+	s.incomingConns[key] = incomingConn
+	// todo incomingConnsExpirations insert
+}
+
+func (s *UtpSocket) removeIncomingConn(key string) (*IncomingPacket, bool) {
+	s.incomingConnsMu.Lock()
+	defer s.incomingConnsMu.Unlock()
+	incomingConn, exists := s.incomingConns[key]
+	if exists {
+		// todo handle expire
+		//delete(s.incomingConnsExpirations, incomingConnsKey)
+		delete(s.incomingConns, key)
+	}
+	return incomingConn, exists
+}
+
+func (s *UtpSocket) nextIncomingConn() *IncomingPacket {
+	s.incomingConnsMu.Lock()
+	defer s.incomingConnsMu.Unlock()
+	var cidHash string
+	var incomingAccept *IncomingPacket
+	for cidHash, incomingAccept = range s.incomingConns {
+		break
+	}
+	if incomingAccept != nil {
+		// todo handle expire
+		//delete(s.incomingConnsExpirations, cidHash)
+		delete(s.incomingConns, cidHash)
+	}
+	return incomingAccept
+}
+
 func (s *UtpSocket) NumConnections() int {
+	s.connsMutex.Lock()
+	defer s.connsMutex.Unlock()
 	return len(s.conns)
 }
 
@@ -286,9 +367,6 @@ func (s *UtpSocket) GenerateCid(peer ConnectionPeer, isInitiator bool, eventCh c
 	}
 
 	generationAttemptCount := 0
-
-	s.connsMutex.Lock()
-	defer s.connsMutex.Unlock()
 	for {
 		if generationAttemptCount > CidGenerationTryWarningCount {
 			s.logger.Warn("tried to generate a cid %d times", generationAttemptCount)
@@ -307,15 +385,12 @@ func (s *UtpSocket) GenerateCid(peer ConnectionPeer, isInitiator bool, eventCh c
 		cid.Send = send
 		cid.Recv = recv
 
-		_, exists := s.conns[cid.Hash()]
-
-		if !exists {
+		if _, exists := s.getConnStream(cid.Hash()); !exists {
 			if eventCh != nil {
-				s.conns[cid.Hash()] = eventCh
+				s.putConnStream(cid.Hash(), eventCh)
 			}
 			return cid
 		}
-
 		generationAttemptCount++
 	}
 }
@@ -353,7 +428,7 @@ func (s *UtpSocket) AcceptWithCid(ctx context.Context, cid *ConnectionId, config
 	}
 
 	// Send accept request through channel
-	s.acceptsWithCid <- accept
+	s.acceptsWithCidCh <- accept
 
 	// Wait for stream or timeout
 	select {
@@ -377,8 +452,10 @@ func (s *UtpSocket) Connect(ctx context.Context, peer ConnectionPeer, config *Co
 	cid := s.GenerateCid(peer, true, streamEvents)
 
 	// Create new UTP stream
+	s.putConnStream(cid.Hash(), streamEvents)
 	stream := NewUtpStream(
 		ctx,
+		s.logger,
 		cid,
 		config,
 		nil,
@@ -406,7 +483,7 @@ func (s *UtpSocket) ConnectWithCid(
 	cid *ConnectionId,
 	config *ConnectionConfig,
 ) (*UtpStream, error) {
-	_, exists := s.conns[cid.Hash()]
+	_, exists := s.getConnStream(cid.Hash())
 	if exists {
 		return nil, fmt.Errorf("connection ID unavailable")
 	}
@@ -414,10 +491,10 @@ func (s *UtpSocket) ConnectWithCid(
 	connected := make(chan error, 1)
 	streamEvents := make(chan *StreamEvent, 10)
 
-	s.conns[cid.Hash()] = streamEvents
-
+	s.putConnStream(cid.Hash(), streamEvents)
 	stream := NewUtpStream(
 		ctx,
+		s.logger,
 		cid,
 		config,
 		nil,
@@ -430,7 +507,7 @@ func (s *UtpSocket) ConnectWithCid(
 		if ok {
 			return stream, nil
 		} else {
-			log.Error("failed to open connection", "cid.send", cid.Send, "cid.recv", cid.Recv, "cid.peer", cid.Peer.Hash())
+			s.logger.Error("failed to open connection", "cid.send", cid.Send, "cid.recv", cid.Recv, "cid.peer", cid.Peer.Hash())
 			return nil, fmt.Errorf("connection timed out")
 		}
 	}
@@ -441,7 +518,7 @@ func (s *UtpSocket) awaitConnected(
 	accept *Accept,
 	connected chan error,
 ) {
-	s.logger.Debug("waiting for answer the new connections", "dst.peer", accept.cid.Peer.Hash(), "cid.Send", accept.cid.Send, "cid.Recv", accept.cid.Recv)
+	s.logger.Debug("waiting for answering the new connections", "dst.peer", accept.cid.Peer.Hash(), "cid.Send", accept.cid.Send, "cid.Recv", accept.cid.Recv)
 	err, ok := <-connected
 	if err == nil && ok {
 		s.logger.Debug("new connection created", "src", accept.cid.Peer.Hash(), "src.cid.Send", accept.cid.Send, "src.cid.Recv", accept.cid.Recv)
@@ -462,12 +539,10 @@ func (s *UtpSocket) selectAcceptHelper(
 	ctx context.Context,
 	cid *ConnectionId,
 	syn *Packet,
-	conns map[string]chan *StreamEvent,
 	accept *Accept,
 	socketEvents chan *SocketEvent,
 ) {
-	_, exists := conns[cid.Hash()]
-	if exists {
+	if _, exists := s.getConnStream(cid.Hash()); exists {
 		accept.stream <- &StreamResult{
 			stream: nil,
 			err:    fmt.Errorf("connection ID unavailable"),
@@ -478,10 +553,12 @@ func (s *UtpSocket) selectAcceptHelper(
 	connected := make(chan error, 1)
 	streamEvents := make(chan *StreamEvent, 10)
 
-	conns[cid.Hash()] = streamEvents
+	s.logger.Debug("put a conn stream at selectAcceptHelper", "cid.Peer", cid.Peer, "cid", cid)
+	s.putConnStream(cid.Hash(), streamEvents)
 
 	stream := NewUtpStream(
 		ctx,
+		s.logger,
 		cid,
 		accept.config,
 		syn,
@@ -493,15 +570,41 @@ func (s *UtpSocket) selectAcceptHelper(
 	go s.awaitConnected(stream, accept, connected)
 }
 
-func (s *UtpSocket) getConnStream(peerInitCid *ConnectionId, ourInitCid *ConnectionId, accCid *ConnectionId) chan *StreamEvent {
+func (s *UtpSocket) removeConnStream(key string) {
 	s.connsMutex.Lock()
 	defer s.connsMutex.Unlock()
+	s.logger.Debug("remove conn stream", "key", key)
+	delete(s.conns, key)
+}
+
+func (s *UtpSocket) putConnStream(key string, streamCh chan *StreamEvent) {
+	s.connsMutex.Lock()
+	defer s.connsMutex.Unlock()
+	s.logger.Debug("put conn stream", "key", key)
+	s.conns[key] = streamCh
+}
+
+func (s *UtpSocket) getConnStream(key string) (chan *StreamEvent, bool) {
+	s.connsMutex.Lock()
+	defer s.connsMutex.Unlock()
+	ch, ok := s.conns[key]
+	return ch, ok
+}
+
+func (s *UtpSocket) getConnStreamWithCids(peerInitCid *ConnectionId, ourInitCid *ConnectionId, accCid *ConnectionId) chan *StreamEvent {
+	s.logger.Debug("will get conn stream after racing the lock")
+	s.connsMutex.Lock()
+	defer s.connsMutex.Unlock()
+
+	s.logger.Debug("get conn stream", "peerInitCidKey", peerInitCid.Hash())
 	if ch, exist := s.conns[peerInitCid.Hash()]; exist {
 		return ch
 	}
+	s.logger.Debug("get conn stream", "ourInitCidKey", ourInitCid.Hash())
 	if ch, exist := s.conns[ourInitCid.Hash()]; exist {
 		return ch
 	}
+	s.logger.Debug("get conn stream", "accInitCidKey", accCid.Hash())
 	if ch, exist := s.conns[accCid.Hash()]; exist {
 		return ch
 	}

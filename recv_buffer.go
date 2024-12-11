@@ -72,13 +72,13 @@ func (rb *ReceiveBuffer) Write(data []byte, seqNum uint16) error {
 	start := rb.initSeqNum + 1
 	next := start + rb.consumed
 	for {
-		data, exists := rb.pending[next]
+		pendingData, exists := rb.pending[next]
 		if !exists {
 			break
 		}
 
-		end := rb.offset + len(data)
-		copy(rb.buf[rb.offset:end], data)
+		end := rb.offset + len(pendingData)
+		copy(rb.buf[rb.offset:end], pendingData)
 		rb.offset = end
 		rb.consumed++
 		delete(rb.pending, next)

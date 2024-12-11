@@ -3,12 +3,18 @@ package utp_go
 import (
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"net"
+	"sync"
 
 	"golang.org/x/crypto/sha3"
 )
 
-var hasher = sha3.New256()
+var hasherPool = sync.Pool{
+	New: func() interface{} {
+		return sha3.New256()
+	},
+}
 
 // ConnectionPeer is an interface representing a remote peer.
 type ConnectionPeer interface {
@@ -50,9 +56,14 @@ type ConnectionId struct {
 
 func (id *ConnectionId) Hash() string {
 	if id.hash == "" {
-		str := fmt.Sprintf("%d:%d:%v", id.Send, id.Recv, id.Peer)
-		bytes := hasher.Sum([]byte(str))
-		defer hasher.Reset()
+		str := fmt.Sprintf("%d:%d:%v", id.Send, id.Recv, id.Peer.Hash())
+		hasher := hasherPool.Get().(hash.Hash)
+		defer func() {
+			hasher.Reset()
+			hasherPool.Put(hasher)
+		}()
+		hasher.Write([]byte(str))
+		bytes := hasher.Sum(nil)[:20]
 		id.hash = hex.EncodeToString(bytes)
 	}
 	return id.hash
