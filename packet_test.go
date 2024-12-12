@@ -77,7 +77,7 @@ func TestSelectiveAckEncodeDecode(t *testing.T) {
 		}
 		ackFromDecode, err := DecodeSelectiveAck(encoded)
 		if err != nil {
-			if encodedLen < 4 && errors.Is(err, ErrInsufficientLen) {
+			if encodedLen < 4 && errors.Is(err, ErrInsufficientSelectiveAckLen) {
 				return true
 			}
 			t.Logf("expected err to be nil, got %v", err)

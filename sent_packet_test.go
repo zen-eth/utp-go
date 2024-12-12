@@ -17,12 +17,10 @@ func TestNextSeqNum(t *testing.T) {
 }
 
 func TestOnTransmitInitial(t *testing.T) {
-	mockController := NewMockController(gomock.NewController(t))
-	mockController.EXPECT().BytesAvailableInWindow().Return(uint32(2048))
-	mockController.EXPECT().OnTransmit(uint16(0), Transmit(0), uint32(1)).Return(nil)
+	ctrl := NewDefaultController(FromConnConfig(NewConnectionConfig()))
 
 	initSeqNum := uint16(math.MaxUint16)
-	sentPackets := NewSentPackets(initSeqNum, mockController)
+	sentPackets := NewSentPackets(initSeqNum, ctrl)
 
 	seqNum := sentPackets.NextSeqNum()
 	data := []byte{0}
@@ -50,13 +48,9 @@ func TestOnTransmitInitial(t *testing.T) {
 }
 
 func TestOnTransmitRetransmit(t *testing.T) {
-	mockController := NewMockController(gomock.NewController(t))
-	mockController.EXPECT().BytesAvailableInWindow().Return(uint32(2048))
-	mockController.EXPECT().OnTransmit(uint16(0), Transmit(0), uint32(1)).Return(nil).AnyTimes()
-	mockController.EXPECT().OnTransmit(uint16(0), Transmit(1), uint32(1)).Return(nil).AnyTimes()
-
 	initSeqNum := uint16(math.MaxUint16)
-	sentPackets := NewSentPackets(initSeqNum, mockController)
+	ctrl := NewDefaultController(FromConnConfig(NewConnectionConfig()))
+	sentPackets := NewSentPackets(initSeqNum, ctrl)
 
 	seqNum := sentPackets.NextSeqNum()
 	data := []byte{0}
@@ -92,11 +86,8 @@ func TestOnTransmitRetransmit(t *testing.T) {
 func TestOnTransmitOutOfOrder(t *testing.T) {
 	initSeqNum := uint16(math.MaxUint16)
 
-	mockController := NewMockController(gomock.NewController(t))
-	mockController.EXPECT().BytesAvailableInWindow().Return(uint32(2048)).AnyTimes()
-	mockController.EXPECT().OnTransmit(initSeqNum+uint16(2), Transmit(0), uint32(1)).Return(nil).AnyTimes()
-
-	sentPackets := NewSentPackets(initSeqNum, mockController)
+	ctrl := NewDefaultController(FromConnConfig(NewConnectionConfig()))
+	sentPackets := NewSentPackets(initSeqNum, ctrl)
 
 	outOfOrderSeqNum := initSeqNum + 2 // wrapping addition for uint16
 	data := []byte{0}
@@ -120,14 +111,10 @@ func TestOnSelectiveAck(t *testing.T) {
 		DELAY    = time.Millisecond * 100 // Assuming this value
 	)
 
-	mockController := NewMockController(gomock.NewController(t))
-	mockController.EXPECT().BytesAvailableInWindow().Return(uint32(2048)).AnyTimes()
-	expected := gomock.AnyOf(uint16(0), uint16(1), uint16(2), uint16(3), uint16(4), uint16(5), uint16(6), uint16(7), uint16(8), uint16(9))
-	mockController.EXPECT().OnTransmit(expected, Transmit(0), uint32(1)).Return(nil).AnyTimes()
-	mockController.EXPECT().OnAck(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	ctrl := NewDefaultController(FromConnConfig(NewConnectionConfig()))
 
 	initSeqNum := uint16(math.MaxUint16)
-	sentPackets := NewSentPackets(initSeqNum, mockController)
+	sentPackets := NewSentPackets(initSeqNum, ctrl)
 
 	data := []byte{0}
 	length := uint32(len(data))

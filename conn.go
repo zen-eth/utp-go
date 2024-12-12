@@ -184,9 +184,9 @@ func NewConnection(
 		socketEvents:   socketEvents,
 		unacked:        NewDelayMap[*Packet](),
 		reads:          reads,
-		readable:       make(chan struct{}, 10),
+		readable:       make(chan struct{}, 100),
 		pendingWrites:  make([]*QueuedWrite, 0),
-		writable:       make(chan struct{}, 10),
+		writable:       make(chan struct{}, 100),
 		latestTimeout:  nil,
 	}
 }

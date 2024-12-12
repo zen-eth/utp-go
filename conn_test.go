@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,6 +35,7 @@ func CreateTestConnection(endpoint Endpoint) *Connection {
 	}
 
 	conn := &Connection{
+		logger:         log.Root(),
 		state:          NewConnState(make(chan error, 1)),
 		cid:            &cid,
 		config:         NewConnectionConfig(),

@@ -83,7 +83,7 @@ func (s *SentPackets) AckNum() uint16 {
 	return num
 }
 
-func (s *SentPackets) SeqNumRange() CircularRangeInclusive {
+func (s *SentPackets) SeqNumRange() *CircularRangeInclusive {
 	end := s.NextSeqNum() - uint16(1)
 	return NewCircularRangeInclusive(s.initSeqNum, end)
 }
@@ -178,18 +178,18 @@ func (s *SentPackets) OnAck(
 	selectiveAck *SelectiveAck,
 	delay time.Duration,
 	now time.Time,
-) (CircularRangeInclusive, []uint16, error) {
+) (*CircularRangeInclusive, []uint16, error) {
 
 	// Check if ack number is in valid range
 	seqRange := s.SeqNumRange()
 	if !seqRange.Contains(ackNum) {
-		return CircularRangeInclusive{}, nil, ErrInvalidAckNum
+		return nil, nil, ErrInvalidAckNum
 	}
 
 	// Do not ACK if ACK num corresponds to initial packet
 	if ackNum != seqRange.Start() {
 		if err := s.OnAckNum(ackNum, selectiveAck, delay, now); err != nil {
-			return CircularRangeInclusive{}, nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -237,7 +237,7 @@ func (s *SentPackets) OnAckNum(
 	lostPackets := s.DetectLostPackets()
 	for _, packetInst := range lostPackets {
 		s.lostPackets = append(s.lostPackets, packetInst)
-		return s.OnLost(packetInst, true)
+		_ = s.OnLost(packetInst, true)
 	}
 	return nil
 }
@@ -368,7 +368,7 @@ func (s *SentPackets) OnLost(seqNum uint16, retransmitting bool) error {
 	if err != nil {
 		return ErrSentPacketMarkLost
 	}
-	return s.congestionCtrl.OnLostPacket(seqNum, retransmitting)
+	return nil
 }
 
 func (s *SentPackets) SeqNumIndex(seqNum uint16) int {

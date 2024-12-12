@@ -1,6 +1,10 @@
 package utp_go
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestContainsStart(t *testing.T) {
 	prop := func(start, end uint16) bool {
@@ -35,12 +39,9 @@ func TestIterator(t *testing.T) {
 			if !ok {
 				break
 			}
-			if idx != expectedIdx {
-				t.Errorf("Expected %v, got %v", expectedIdx, idx)
-				return false
-			}
-			expectedIdx++
-			length++
+			require.Equal(t, expectedIdx, idx, "Expected %v, got %v", expectedIdx, idx)
+			expectedIdx += 1
+			length += 1
 		}
 
 		var expectedLen int

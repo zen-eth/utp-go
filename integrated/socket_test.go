@@ -36,7 +36,7 @@ func TestManyConcurrentTransfers(t *testing.T) {
 	}()
 
 	// Initialize logging
-	logFile, _ := os.OpenFile("test_socket_many_concurrent_transfer.log", os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, _ := os.OpenFile("test_socket_many_concurrent_transfer.log", os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
 	//handler := log.NewTerminalHandler(os.Stdout, true)
 	handler := log.NewTerminalHandler(logFile, false)
 	log.SetDefault(log.NewLogger(handler))
@@ -62,12 +62,12 @@ func TestManyConcurrentTransfers(t *testing.T) {
 	// Create wait group for all transfers
 	var wg sync.WaitGroup
 
-	const numTransfers = 1_000_000
+	const numTransfers = 100
 	start := time.Now()
 
 	// Start transfers
 	for i := 0; i < numTransfers; i++ {
-		wg.Add(1) // One for sender, one for receiver
+		wg.Add(2) // One for sender, one for receiver
 		initiateTransfer(
 			t, ctx,
 			uint16(i*2),

@@ -123,13 +123,13 @@ func WithSocket(ctx context.Context, socket Conn, logger log.Logger) *UtpSocket 
 		cancel:           cancel,
 		logger:           logger,
 		conns:            make(map[string]chan *StreamEvent),
-		accepts:          make(chan *Accept, 100),
-		acceptsWithCidCh: make(chan *Accept, 100),
-		socketEvents:     make(chan *SocketEvent, 1000),
+		accepts:          make(chan *Accept, 1000),
+		acceptsWithCidCh: make(chan *Accept, 1000),
+		socketEvents:     make(chan *SocketEvent, 10000),
 		awaiting:         make(map[string]*Accept),
 		incomingConns:    make(map[string]*IncomingPacket),
 		socket:           socket,
-		readNextCh:       make(chan struct{}, 10),
+		readNextCh:       make(chan struct{}, 1000),
 		incomingBuf:      make(chan *IncomingPacketRaw, 1000),
 	}
 
