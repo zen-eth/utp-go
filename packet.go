@@ -46,6 +46,23 @@ func (p PacketType) Check() error {
 	return nil
 }
 
+func (p *PacketType) String() string {
+	switch *p {
+	case ST_DATA:
+		return "ST_DATA"
+	case ST_FIN:
+		return "ST_FIN"
+	case ST_STATE:
+		return "ST_STATE"
+	case ST_RESET:
+		return "ST_RESET"
+	case ST_SYN:
+		return "ST_SYN"
+	default:
+		return "UNKNOWN"
+	}
+}
+
 type PacketHeaderV1 struct {
 	PacketType    PacketType
 	Version       byte

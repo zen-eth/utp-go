@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -23,10 +24,10 @@ type UtpStream struct {
 	reads        chan *ReadOrWriteResult
 	writes       chan *QueuedWrite
 	streamEvents chan *StreamEvent
-	shutdown     bool
-	shutdownCh   chan struct{}
+	shutdown     *atomic.Bool
 	connHandle   *sync.WaitGroup
 	conn         *Connection
+	closeOnce    sync.Once
 }
 
 func NewUtpStream(
@@ -53,7 +54,7 @@ func NewUtpStream(
 		writes:       make(chan *QueuedWrite, 1),
 		streamEvents: streamEvents,
 		connHandle:   connHandle,
-		shutdownCh:   make(chan struct{}, 1),
+		shutdown:     &atomic.Bool{},
 	}
 
 	utpStream.conn = NewConnection(streamCtx, logger, cid, config, syn, connected, socketEvents, utpStream.reads)
@@ -92,7 +93,7 @@ func (s *UtpStream) ReadToEOF(ctx context.Context, buf *[]byte) (int, error) {
 			}
 			s.logger.Debug("read a new buf", "len", len(res.Data))
 			if len(res.Data) == 0 {
-				return n, nil
+				return n, res.Err
 			}
 			n += res.Len
 			data = append(data, res.Data[:res.Len]...)
@@ -102,7 +103,7 @@ func (s *UtpStream) ReadToEOF(ctx context.Context, buf *[]byte) (int, error) {
 }
 
 func (s *UtpStream) Write(ctx context.Context, buf []byte) (int, error) {
-	if s.shutdown {
+	if s.shutdown.Load() {
 		return 0, ErrNotConnected
 	}
 	resCh := make(chan *ReadOrWriteResult, 1)
@@ -133,11 +134,14 @@ func (s *UtpStream) Write(ctx context.Context, buf []byte) (int, error) {
 }
 
 func (s *UtpStream) Close() {
-	s.shutdown = true
-	s.streamCancel()
-	s.connHandle.Wait()
-	close(s.writes)
-	close(s.reads)
-	close(s.streamEvents)
+	s.logger.Debug("call close utp stream")
+	s.closeOnce.Do(func() {
+		s.shutdown.Store(true)
+		s.connHandle.Wait()
+		s.streamCancel()
+		close(s.writes)
+		close(s.reads)
+		close(s.streamEvents)
+	})
 
 }

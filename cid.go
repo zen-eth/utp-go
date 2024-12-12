@@ -26,6 +26,10 @@ type UdpPeer struct {
 	addr *net.UDPAddr
 }
 
+func NewUdpPeer(addr *net.UDPAddr) *UdpPeer {
+	return &UdpPeer{addr: addr}
+}
+
 func (p *UdpPeer) Hash() string {
 	return p.addr.String()
 }

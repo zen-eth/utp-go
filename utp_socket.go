@@ -2,7 +2,6 @@ package utp_go
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -105,12 +104,12 @@ type UtpSocket struct {
 	incomingBuf      chan *IncomingPacketRaw
 }
 
-func Bind(network string, addr *net.UDPAddr) (Conn, error) {
+func Bind(ctx context.Context, network string, addr *net.UDPAddr, logger log.Logger) (*UtpSocket, error) {
 	conn, err := net.ListenUDP(network, addr)
 	if err != nil {
 		return nil, err
 	}
-	return &UdpConn{conn}, nil
+	return WithSocket(ctx, &UdpConn{conn}, logger), nil
 }
 
 func WithSocket(ctx context.Context, socket Conn, logger log.Logger) *UtpSocket {
@@ -124,14 +123,14 @@ func WithSocket(ctx context.Context, socket Conn, logger log.Logger) *UtpSocket 
 		cancel:           cancel,
 		logger:           logger,
 		conns:            make(map[string]chan *StreamEvent),
-		accepts:          make(chan *Accept, 1),
-		acceptsWithCidCh: make(chan *Accept, 1),
-		socketEvents:     make(chan *SocketEvent, 10),
+		accepts:          make(chan *Accept, 100),
+		acceptsWithCidCh: make(chan *Accept, 100),
+		socketEvents:     make(chan *SocketEvent, 1000),
 		awaiting:         make(map[string]*Accept),
 		incomingConns:    make(map[string]*IncomingPacket),
 		socket:           socket,
 		readNextCh:       make(chan struct{}, 10),
-		incomingBuf:      make(chan *IncomingPacketRaw, 10),
+		incomingBuf:      make(chan *IncomingPacketRaw, 1000),
 	}
 
 	go utp.readLoop()
@@ -143,6 +142,7 @@ func WithSocket(ctx context.Context, socket Conn, logger log.Logger) *UtpSocket 
 func (s *UtpSocket) readLoop() {
 	buf := make([]byte, math.MaxUint16)
 	s.logger.Debug("utp socket readLoop start...")
+	defer s.logger.Debug("utp socket readLoop exit")
 	for range s.readNextCh {
 		n, from, err := s.socket.ReadFrom(buf)
 		s.logger.Debug("read data from base socket", "n", n, "from", from)
@@ -159,14 +159,16 @@ func (s *UtpSocket) readLoop() {
 		}
 		dstBuf := make([]byte, n)
 		copy(dstBuf, buf[:n])
-		s.logger.Debug("recv a packet from remote", "buf.len", n, "from", from, "buf", hex.EncodeToString(buf[:n]))
 		s.incomingBuf <- &IncomingPacketRaw{peer: from, payload: dstBuf}
+		s.logger.Debug("recv a packet from remote", "buf.len", n, "from", from)
 	}
 }
 
 func (s *UtpSocket) eventLoop() {
 	s.readNextCh <- struct{}{}
 	s.logger.Debug("utp socket eventLoop start...")
+	defer s.logger.Debug("utp socket eventLoop end...")
+	var n int
 	for {
 		select {
 		case event := <-s.socketEvents:
@@ -175,7 +177,7 @@ func (s *UtpSocket) eventLoop() {
 			case Outgoing:
 				s.logger.Debug("Send a packet out",
 					"target.cid", event.ConnectionId,
-					"packet.type", event.Packet.Header.PacketType,
+					"packet.type", event.Packet.Header.PacketType.String(),
 					"packet.seqNum", event.Packet.Header.SeqNum,
 					"packet.ackNum", event.Packet.Header.AckNum,
 					"packet.body.len", len(event.Packet.Body))
@@ -192,12 +194,12 @@ func (s *UtpSocket) eventLoop() {
 						"cid", event.Packet.Header.ConnectionId,
 						"type", event.Packet.Header.PacketType)
 				}
+
 				s.readNextCh <- struct{}{}
 
 			case SocketShutdown:
 				s.logger.Debug("uTP conn shutdown", "cid.Hash", event.ConnectionId.Hash())
 				s.removeConnStream(event.ConnectionId.Hash())
-
 			}
 		case acceptWithCid := <-s.acceptsWithCidCh:
 			s.handleNewAcceptWithCidEvent(acceptWithCid)
@@ -205,26 +207,31 @@ func (s *UtpSocket) eventLoop() {
 			s.handleNewAcceptEvent(accept)
 		case incomingRaw := <-s.incomingBuf:
 			// Handle incoming packets
-			s.logger.Debug("receive incoming packet", "peer", incomingRaw.peer)
 			packetPtr, err := DecodePacket(incomingRaw.payload)
 			if err != nil {
 				s.logger.Warn("Unable to decode uTP packet", "peer", incomingRaw.peer)
 				continue
 			}
 
+			n += len(packetPtr.Body)
 			peerInitCID := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeSendIdPeerInitiated)
 			weInitCID := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeSendIdWeInitiated)
 			accCID := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeRecvId)
+			s.logger.Debug("receive incoming packet",
+				"src.peer", incomingRaw.peer,
+				"packet.type", packetPtr.Header.PacketType.String(),
+				"packet.cid", packetPtr.Header.ConnectionId,
+				"packet.seqNum", packetPtr.Header.SeqNum,
+				"packet.ackNum", packetPtr.Header.AckNum,
+				"packet.Data.len", len(packetPtr.Body),
+				"count", n)
 			// Look for existing connection
 			if connStream := s.getConnStreamWithCids(accCID, weInitCID, peerInitCID); connStream != nil {
-				s.logger.Debug("receive a packet from a exist conn stream",
-					"src.peer", incomingRaw.peer,
-					"packet.type", packetPtr.Header.PacketType,
-					"packet.Data.len", len(packetPtr.Body))
 				connStream <- &StreamEvent{
 					Type:   StreamIncoming,
 					Packet: packetPtr,
 				}
+				s.logger.Debug("put a packet from a exist conn stream to conn stream")
 			} else {
 				if packetPtr.Header.PacketType == ST_SYN {
 					cid := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeRecvId)
@@ -354,7 +361,7 @@ func (s *UtpSocket) NumConnections() int {
 
 func (s *UtpSocket) Close() {
 	s.cancel()
-	close(s.readNextCh)
+	s.sendShutdownEventToConns()
 }
 
 func (s *UtpSocket) Cid(peer ConnectionPeer, isInitiator bool) *ConnectionId {
@@ -503,8 +510,8 @@ func (s *UtpSocket) ConnectWithCid(
 		connected,
 	)
 	select {
-	case _, ok := <-connected:
-		if ok {
+	case err := <-connected:
+		if err == nil {
 			return stream, nil
 		} else {
 			s.logger.Error("failed to open connection", "cid.send", cid.Send, "cid.recv", cid.Recv, "cid.peer", cid.Peer.Hash())
@@ -584,6 +591,16 @@ func (s *UtpSocket) putConnStream(key string, streamCh chan *StreamEvent) {
 	s.conns[key] = streamCh
 }
 
+func (s *UtpSocket) sendShutdownEventToConns() {
+	s.connsMutex.Lock()
+	defer s.connsMutex.Unlock()
+	for _, ch := range s.conns {
+		ch <- &StreamEvent{
+			Type: StreamShutdown,
+		}
+	}
+}
+
 func (s *UtpSocket) getConnStream(key string) (chan *StreamEvent, bool) {
 	s.connsMutex.Lock()
 	defer s.connsMutex.Unlock()
@@ -592,22 +609,22 @@ func (s *UtpSocket) getConnStream(key string) (chan *StreamEvent, bool) {
 }
 
 func (s *UtpSocket) getConnStreamWithCids(peerInitCid *ConnectionId, ourInitCid *ConnectionId, accCid *ConnectionId) chan *StreamEvent {
-	s.logger.Debug("will get conn stream after racing the lock")
 	s.connsMutex.Lock()
 	defer s.connsMutex.Unlock()
 
-	s.logger.Debug("get conn stream", "peerInitCidKey", peerInitCid.Hash())
 	if ch, exist := s.conns[peerInitCid.Hash()]; exist {
+		s.logger.Debug("get conn stream", "peerInitCidKey", peerInitCid.Hash(), "peerInitCid.Send", peerInitCid.Send, "peerInitCid.Recv", peerInitCid.Recv)
 		return ch
 	}
-	s.logger.Debug("get conn stream", "ourInitCidKey", ourInitCid.Hash())
 	if ch, exist := s.conns[ourInitCid.Hash()]; exist {
+		s.logger.Debug("get conn stream", "ourInitCidKey", ourInitCid.Hash(), "ourInitCid.Send", ourInitCid.Send, "ourInitCid.Recv", ourInitCid.Recv)
 		return ch
 	}
-	s.logger.Debug("get conn stream", "accInitCidKey", accCid.Hash())
 	if ch, exist := s.conns[accCid.Hash()]; exist {
+		s.logger.Debug("get conn stream", "accInitCidKey", accCid.Hash(), "accCid.Send", accCid.Send, "accCid.Recv", accCid.Recv)
 		return ch
 	}
+	s.logger.Debug("has no conn stream fit")
 	return nil
 }
 

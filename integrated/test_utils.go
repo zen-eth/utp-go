@@ -28,7 +28,7 @@ type MockUdpSocket struct {
 	sendCh   chan []byte
 	recvCh   chan []byte
 	onlyPeer utp.ConnectionPeer
-	upStatus atomic.Bool
+	upStatus *atomic.Bool
 }
 
 func (s *MockUdpSocket) ReadFrom(b []byte) (int, utp.ConnectionPeer, error) {
@@ -51,6 +51,7 @@ func (s *MockUdpSocket) WriteTo(b []byte, dst utp.ConnectionPeer) (int, error) {
 		panic(fmt.Sprintf("MockUdpSocket only supports Writing To one peer: dst.peer = %s, onlyPeer = %s", dst.Hash(), s.onlyPeer.Hash()))
 	}
 	if !s.upStatus.Load() {
+		log.Debug("MockUdpSocket is down, cannot send packet")
 		return len(b), nil
 	}
 	select {
@@ -73,11 +74,13 @@ func buildLinkPair() (*MockUdpSocket, *MockUdpSocket) {
 		sendCh:   peerACh,
 		recvCh:   peerBCh,
 		onlyPeer: peerB,
+		upStatus: &atomic.Bool{},
 	}, &MockUdpSocket{
 		// B -> A
 		sendCh:   peerBCh,
 		recvCh:   peerACh,
 		onlyPeer: peerA,
+		upStatus: &atomic.Bool{},
 	}
 	a.upStatus.Store(true)
 	b.upStatus.Store(true)

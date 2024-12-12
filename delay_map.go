@@ -57,3 +57,13 @@ func (m *DelayMap[P]) Remove(key any) {
 	}
 	delete(m.unacked, key)
 }
+
+func (m *DelayMap[P]) Keys() []any {
+	m.unackedMu.Lock()
+	defer m.unackedMu.Unlock()
+	var keys []any
+	for k := range m.unacked {
+		keys = append(keys, k)
+	}
+	return keys
+}
