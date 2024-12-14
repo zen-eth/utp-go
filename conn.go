@@ -205,7 +205,7 @@ func (c *Connection) EventLoop(stream *UtpStream) error {
 			ConnectionId: c.cid,
 		}:
 		}
-		c.logger.Debug("a initial syn packet", "dst.peer", c.cid.Peer)
+		c.logger.Debug("put a initial syn packet to delay map", "dst.peer", c.cid.Peer, "synSeqNum", synSeqNum)
 		c.unacked.Put(synSeqNum, synPkt, c.config.InitialTimeout)
 
 		c.endpoint.Attempts = 1
@@ -287,6 +287,7 @@ func (c *Connection) EventLoop(stream *UtpStream) error {
 			c.logger.Debug("unack timeout",
 				"seq", timeoutPkt.Header.SeqNum,
 				"ack", timeoutPkt.Header.AckNum,
+				"item.key", timeoutItem.Key,
 				"type", timeoutPkt.Header.PacketType)
 			c.unacked.Remove(timeoutItem.Key)
 			c.OnTimeout(timeoutPkt, time.Now())
@@ -532,6 +533,7 @@ func (c *Connection) ProcessReads() {
 		return
 	}
 
+	c.logger.Debug("read data saving in the recvBuf, before...", "avaiable", recvBuf.Available(), "isEmpty", recvBuf.IsEmpty())
 	for recvBuf != nil && !recvBuf.IsEmpty() {
 		buf := make([]byte, c.config.MaxPacketSize)
 		n := recvBuf.Read(buf)
@@ -540,6 +542,7 @@ func (c *Connection) ProcessReads() {
 		}
 		c.reads <- &ReadOrWriteResult{Data: buf, Len: n}
 	}
+	c.logger.Debug("read data saving in the recvBuf, after...", "avaiable", recvBuf.Available(), "isEmpty", recvBuf.IsEmpty())
 
 	// If we have reached EOF, send an empty resultCh to all pending reads
 	if c.EOF() {
@@ -648,7 +651,12 @@ func (c *Connection) OnTimeout(packet *Packet, now time.Time) {
 func (c *Connection) OnPacket(packet *Packet, now time.Time) {
 	c.logger.Debug("on packet start...",
 		"packet.body.len", len(packet.Body),
-		"packet.type", packet.Header.PacketType.String(), "now", now)
+		"packet.type", packet.Header.PacketType.String(),
+		"packet.cid", packet.Header.ConnectionId,
+		"packet.seqnum", packet.Header.SeqNum,
+		"packet.acknum", packet.Header.AckNum,
+		"packet.windowSize", packet.Header.WndSize,
+		"now", now)
 	defer c.logger.Debug("on packet end...", "now", now)
 	nowMicros := time.Now().UnixMicro()
 	c.peerRecvWindow = packet.Header.WndSize
@@ -719,16 +727,17 @@ func (c *Connection) OnPacket(packet *Packet, now time.Time) {
 	// Notify writable on STATE packets
 	if packet.Header.PacketType == ST_STATE {
 		c.logger.Debug("put notify writable before...", "now", now, "writableCh.len", len(c.writable))
-		if len(c.writable) == 0 {
-			c.writable <- struct{}{}
-		}
-		c.logger.Debug("put notify writable end...", "now", now)
+		//if len(c.writable) == 0 {
+		//
+		//}
+		c.writable <- struct{}{}
+		c.logger.Debug("put notify writable end...", "c.writable.len", len(c.writable), "now", now)
 	}
 
 	// Notify readable on data or FIN
 	if len(packet.Body) > 0 || packet.Header.PacketType == ST_FIN {
 		c.readable <- struct{}{}
-		c.logger.Debug("notify readable...")
+		c.logger.Debug("notify readable...", "readable.len", len(c.readable))
 	}
 
 	// Handle connection closing cases
@@ -766,8 +775,6 @@ func (c *Connection) ProcessAck(
 	delay time.Duration,
 	now time.Time,
 ) error {
-	c.logger.Debug("will process ack packet...", "ackNum", ackNum)
-	defer c.logger.Debug("will process ack packet end...", "ackNum", ackNum)
 	if c.state.stateType != ConnConnected {
 		return nil
 	}
@@ -775,18 +782,20 @@ func (c *Connection) ProcessAck(
 	fullAcked, selectedAcks, err := c.state.SentPackets.OnAck(
 		ackNum, selectiveAck, delay, now)
 	if err != nil {
-		c.logger.Debug("sent packets OnAck has error", err)
+		c.logger.Debug("sent packets OnAck has error", "err", err)
 		if errors.Is(err, ErrInvalidAckNum) {
 			c.Reset(err)
 			return err
 		}
 		return err
 	}
-	startSeq := fullAcked.start
-	for fullAcked.Contains(startSeq) {
-		c.unacked.Remove(startSeq)
-		startSeq += 1
-	}
+	c.logger.Debug("process ack",
+		"fullAcked.start", fullAcked.start,
+		"fullAcked.end", fullAcked.end)
+	c.unacked.Retain(func(key any) bool {
+		return fullAcked.Contains(key.(uint16))
+	})
+	c.logger.Debug("process ack", "selectedAcks", selectedAcks)
 	for _, selectedAck := range selectedAcks {
 		c.unacked.Remove(selectedAck)
 	}
@@ -869,8 +878,14 @@ func (c *Connection) OnData(seqNum uint16, data []byte) error {
 		}
 		// not closing should send data
 		if len(data) <= c.state.RecvBuf.Available() && !c.state.RecvBuf.WasWritten(seqNum) {
-			c.logger.Debug("write data to recv buffer", "src.peer", c.cid.Peer, "seqNum", seqNum, "data.len", len(data))
-			return c.state.RecvBuf.Write(data, seqNum)
+			err := c.state.RecvBuf.Write(data, seqNum)
+			if err != nil {
+				c.logger.Debug("write data to recv buffer, but available space is not enough",
+					"src.peer", c.cid.Peer, "seqNum", seqNum, "data.len", len(data))
+			}
+			c.logger.Debug("write data to recv buffer, but available space is not enough",
+				"src.peer", c.cid.Peer, "seqNum", seqNum, "data.len", len(data), "nextAckNum", c.state.RecvBuf.AckNum())
+			return err
 		}
 	}
 	return nil
@@ -1035,6 +1050,7 @@ func (c *Connection) Transmit(packet *Packet, now time.Time) {
 		"packet.type", packet.Header.PacketType.String(),
 		"packet.seqNum", packet.Header.SeqNum,
 		"packet.ackNum", packet.Header.AckNum,
+		"unacked.key", packet.Header.SeqNum,
 		"packet.body.len", len(packet.Body))
 
 	c.state.SentPackets.OnTransmit(packet.Header.SeqNum, packet.Header.PacketType, payload, length, now)

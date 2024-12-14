@@ -80,9 +80,9 @@ func (rb *ReceiveBuffer) Write(data []byte, seqNum uint16) error {
 		end := rb.offset + len(pendingData)
 		copy(rb.buf[rb.offset:end], pendingData)
 		rb.offset = end
-		rb.consumed++
+		rb.consumed += 1
 		delete(rb.pending, next)
-		next++
+		next += 1
 	}
 
 	return nil

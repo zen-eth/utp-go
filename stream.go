@@ -91,7 +91,7 @@ func (s *UtpStream) ReadToEOF(ctx context.Context, buf *[]byte) (int, error) {
 			if !ok {
 				return n, nil
 			}
-			s.logger.Debug("read a new buf", "len", len(res.Data))
+			s.logger.Debug("read a new buf", "len", res.Len)
 			if len(res.Data) == 0 {
 				return n, res.Err
 			}

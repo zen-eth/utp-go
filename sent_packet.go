@@ -4,6 +4,8 @@ import (
 	"errors"
 	"math"
 	"time"
+
+	"github.com/ethereum/go-ethereum/log"
 )
 
 const LOSS_THRESHOLD = 3
@@ -179,7 +181,6 @@ func (s *SentPackets) OnAck(
 	delay time.Duration,
 	now time.Time,
 ) (*CircularRangeInclusive, []uint16, error) {
-
 	// Check if ack number is in valid range
 	seqRange := s.SeqNumRange()
 	if !seqRange.Contains(ackNum) {
@@ -284,8 +285,8 @@ func (s *SentPackets) DetectLostPackets() []uint16 {
 	if err != nil {
 		return lost
 	}
-	start := s.SeqNumIndex(firstUnacked)
-	packets := s.packets[start:]
+	startIndex := s.SeqNumIndex(firstUnacked)
+	packets := s.packets[startIndex:]
 
 	// Iterate in reverse order
 	for i := len(packets) - 1; i >= 0; i-- {
@@ -305,7 +306,6 @@ func (s *SentPackets) DetectLostPackets() []uint16 {
 func (s *SentPackets) Ack(seqNum uint16, delay time.Duration, now time.Time) error {
 	index := s.SeqNumIndex(seqNum)
 	packetInst := s.packets[index]
-
 	ack := Ack{
 		Delay:      delay,
 		RTT:        packetInst.rtt(now),
@@ -315,6 +315,7 @@ func (s *SentPackets) Ack(seqNum uint16, delay time.Duration, now time.Time) err
 	if err := s.congestionCtrl.OnAck(packetInst.seqNum, ack); err != nil {
 		return err
 	}
+	log.Trace("record Acks", "seqNum", packetInst.seqNum, "acks.len", len(packetInst.acks)+1)
 
 	packetInst.acks = append(packetInst.acks, now)
 
@@ -333,8 +334,9 @@ func (s *SentPackets) AckPriorUnacked(seqNum uint16, delay time.Duration, now ti
 	if start >= end {
 		return nil
 	}
-
+	log.Trace("AckPriorUnacked", "sentPackets.len", len(s.packets), "start", start, "end", end)
 	for _, packetInst := range s.packets[start:end] {
+		log.Trace("record Ack", "seqNum", packetInst.seqNum)
 		if err = s.Ack(packetInst.seqNum, delay, now); err != nil {
 			return err
 		}
@@ -347,12 +349,12 @@ func (s *SentPackets) LastAckNum() (uint16, bool) {
 		return 0, true
 	}
 	var num uint16
-	var none bool
-	for _, sendtPacket := range s.packets {
-		if len(sendtPacket.acks) != 0 {
-			num = sendtPacket.seqNum
+	none := true
+	for _, packetInst := range s.packets {
+		if len(packetInst.acks) != 0 {
+			num = packetInst.seqNum
+			none = false
 		} else {
-			none = true
 			break
 		}
 	}
@@ -387,6 +389,8 @@ func (s *SentPackets) FirstUnackedSeqNum() (uint16, error) {
 
 	var seqNum uint16
 	lastAckNum, isNone := s.LastAckNum()
+	log.Debug("get laste unacked num",
+		"lastAckNum", lastAckNum, "isNone", isNone)
 	if isNone {
 		seqNum = s.initSeqNum + uint16(1)
 	} else {

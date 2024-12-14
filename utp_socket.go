@@ -125,12 +125,12 @@ func WithSocket(ctx context.Context, socket Conn, logger log.Logger) *UtpSocket 
 		conns:            make(map[string]chan *StreamEvent),
 		accepts:          make(chan *Accept, 1000),
 		acceptsWithCidCh: make(chan *Accept, 1000),
-		socketEvents:     make(chan *SocketEvent, 10000),
+		socketEvents:     make(chan *SocketEvent, 100000),
 		awaiting:         make(map[string]*Accept),
 		incomingConns:    make(map[string]*IncomingPacket),
 		socket:           socket,
-		readNextCh:       make(chan struct{}, 1000),
-		incomingBuf:      make(chan *IncomingPacketRaw, 1000),
+		readNextCh:       make(chan struct{}, 100000),
+		incomingBuf:      make(chan *IncomingPacketRaw, 100000),
 	}
 
 	go utp.readLoop()
@@ -161,6 +161,7 @@ func (s *UtpSocket) readLoop() {
 		copy(dstBuf, buf[:n])
 		s.incomingBuf <- &IncomingPacketRaw{peer: from, payload: dstBuf}
 		s.logger.Debug("recv a packet from remote", "buf.len", n, "from", from)
+		s.readNextCh <- struct{}{}
 	}
 }
 
@@ -194,8 +195,6 @@ func (s *UtpSocket) eventLoop() {
 						"cid", event.Packet.Header.ConnectionId,
 						"type", event.Packet.Header.PacketType)
 				}
-
-				s.readNextCh <- struct{}{}
 
 			case SocketShutdown:
 				s.logger.Debug("uTP conn shutdown", "cid.Hash", event.ConnectionId.Hash())
