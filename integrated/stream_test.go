@@ -243,7 +243,7 @@ func TestCloseSucceedsIfOnlyFinAckDropped(t *testing.T) {
 	sendLink, sendCid, recvLink, recvCid := buildConnectedPair()
 
 	// Track receiver link status
-	rxLinkUp := recvLink.upStatus
+	sendLinkUp := sendLink.upStatus
 
 	// Create UTP sockets
 	ctx := context.Background()
@@ -307,10 +307,7 @@ func TestCloseSucceedsIfOnlyFinAckDropped(t *testing.T) {
 		readBuf := make([]byte, 0)
 		_, err := recvStream.ReadToEOF(ctx, &readBuf)
 		require.ErrorIs(t, err, utp.ErrTimedOut, "Expected timeout error but got none")
-		if !bytes.Equal(readBuf, data) {
-			t.Error("Received data doesn't match sent data")
-			return
-		}
+		require.True(t, bytes.Equal(readBuf, data), "Received data doesn't match sent data")
 		close(recvComplete)
 	}()
 
@@ -321,7 +318,7 @@ func TestCloseSucceedsIfOnlyFinAckDropped(t *testing.T) {
 	time.Sleep(expectedIdleTimeout / 2)
 
 	// Disable network link
-	rxLinkUp.Store(false)
+	sendLinkUp.Store(false)
 
 	// Try to close send stream with timeout
 	sendCloseDone := make(chan struct{})

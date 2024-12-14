@@ -8,6 +8,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"runtime/pprof"
+	"runtime/trace"
 	"sync"
 	"testing"
 	"time"
@@ -53,12 +54,13 @@ func TestManyConcurrentTransfers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to bind recv socket: %v", err)
 	}
+	defer recvLink.Close()
 
 	sendLink, err := utp.Bind(ctx, "udp", sendAddr, log.Root().New("local", ":3401"))
 	if err != nil {
 		t.Fatalf("Failed to bind send socket: %v", err)
 	}
-
+	defer sendLink.Close()
 	// Create wait group for all transfers
 	var wg sync.WaitGroup
 
@@ -96,6 +98,212 @@ func TestManyConcurrentTransfers(t *testing.T) {
 		numTransfers, elapsed, transferRate)
 }
 
+func TestUdpTransfer(t *testing.T) {
+	recvAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3600}
+	recvConn, err := net.ListenUDP("udp", recvAddr)
+	require.NoError(t, err, "Failed to bind recv socket")
+	sendAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3601}
+	sendConn, err := net.ListenUDP("udp", sendAddr)
+
+	var wg sync.WaitGroup
+	hugeData := bytes.Repeat([]byte{0xa5}, 50*1024*1024)
+	length := 1024 * 1024 * 50
+	start := time.Now()
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		recvBuf := make([]byte, 50*1024*1024)
+		startIndex := 0
+		for startIndex < length {
+			n, addr, err := recvConn.ReadFrom(recvBuf[startIndex:])
+			require.Equal(t, sendAddr.String(), addr.String(), "addr mismatch")
+			require.NoError(t, err, "Failed to recv data")
+			startIndex += n
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		offset := 0
+		const onceSize = 980
+		for offset < length {
+			startIndex := offset
+			endIndex := offset + onceSize
+			if endIndex > length {
+				endIndex = length
+			}
+			n, err := sendConn.WriteToUDP(hugeData[startIndex:endIndex], recvAddr)
+			require.NoError(t, err, "Failed to send data")
+			require.Equal(t, endIndex-startIndex, n, "Failed to send all data")
+			offset = endIndex
+		}
+
+	}()
+	wg.Wait()
+
+	elapsed := time.Since(start)
+	megabytesSent := float64(length) / 1_000_000.0
+	megabitsSent := megabytesSent * 8.0
+	transferRate := megabitsSent / elapsed.Seconds()
+
+	t.Logf(
+		"finished single large transfer test with %.0f MB, in %v, at a rate of %.1f Mbps",
+		megabytesSent,
+		elapsed,
+		transferRate,
+	)
+}
+
+func TestOneHugeDataTransfer(t *testing.T) {
+	// CPU 分析
+	cpuFile, _ := os.Create("cpu.prof")
+	pprof.StartCPUProfile(cpuFile)
+	defer pprof.StopCPUProfile()
+
+	// trace 分析
+	traceFile, _ := os.Create("trace.prof")
+	trace.Start(traceFile)
+	defer trace.Stop()
+	// 内存分析
+	//memFile, _ := os.Create("mem.prof")
+	//defer func() {
+	//	pprof.WriteHeapProfile(memFile)
+	//}()
+	//logFile, _ := os.OpenFile("test_one_huge_data_transfer.log", os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
+	//handler := log.NewTerminalHandler(logFile, false)
+	//handler := log.NewTerminalHandler(os.Stdout, true)
+	//log.SetDefault(log.NewLogger(handler))
+
+	// 创建50MB的测试数据
+	hugeData := bytes.Repeat([]byte{0xf0}, 1024*1024*50)
+
+	t.Log("starting single transfer of huge data test")
+
+	recvAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3500}
+	sendAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3501}
+
+	ctx := context.Background()
+	recv, err := utp.Bind(ctx, "udp", recvAddr, log.Root().New("local", ":3500"))
+	require.NoError(t, err, "Failed to bind recv socket")
+	send, err := utp.Bind(ctx, "udp", sendAddr, log.Root().New("local", ":3501"))
+
+	start := time.Now()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// 启动传输
+	go func() {
+		initiateTransfer(t, ctx, uint16(2), recvAddr, recv, sendAddr, send, hugeData, &wg)
+	}()
+
+	// 等待接收完成
+	timeoutCtx, cancel := context.WithTimeout(ctx, 500*time.Second)
+	go func() {
+		wg.Wait()
+		cancel()
+	}()
+
+	select {
+	case <-timeoutCtx.Done():
+		t.Fatalf("huge data transfer timed out")
+	}
+
+	elapsed := time.Since(start)
+	megabytesSent := float64(len(hugeData)) / 1_000_000.0
+	megabitsSent := megabytesSent * 8.0
+	transferRate := megabitsSent / elapsed.Seconds()
+
+	t.Logf(
+		"finished single large transfer test with %.0f MB, in %v, at a rate of %.1f Mbps",
+		megabytesSent,
+		elapsed,
+		transferRate,
+	)
+}
+
+func TestEmptySocketConnCount(t *testing.T) {
+	socketAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3402}
+
+	// 假设我们有一个 UtpSocket 的包装结构
+	utpSocket, err := utp.Bind(context.Background(), "udp", socketAddr, nil)
+	require.NoError(t, err, "Failed to bind socket")
+	defer utpSocket.Close()
+
+	require.Equal(t, 0, utpSocket.NumConnections(), "Expected 0 connections, got %d", utpSocket.NumConnections())
+}
+
+func TestSocketReportsTwoConns(t *testing.T) {
+	ctx := context.Background()
+	connConfig := utp.NewConnectionConfig()
+	// create receive socket
+	recvAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3404}
+	recv, err := utp.Bind(ctx, "udp", recvAddr, nil)
+	require.NoError(t, err, "Failed to bind recv socket")
+
+	// 创建发送socket
+	sendAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3405}
+	send, err := utp.Bind(ctx, "udp", sendAddr, nil)
+	require.NoError(t, err, "Failed to bind send socket")
+
+	// 定义连接ID
+	recvOneCid := &utp.ConnectionId{
+		Send: 100,
+		Recv: 101,
+		Peer: utp.NewUdpPeer(sendAddr),
+	}
+	sendOneCid := &utp.ConnectionId{
+		Send: 101,
+		Recv: 100,
+		Peer: utp.NewUdpPeer(recvAddr),
+	}
+
+	recvTwoCid := &utp.ConnectionId{
+		Send: 200,
+		Recv: 201,
+		Peer: utp.NewUdpPeer(sendAddr),
+	}
+	sendTwoCid := &utp.ConnectionId{
+		Send: 201,
+		Recv: 200,
+		Peer: utp.NewUdpPeer(recvAddr),
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(4)
+
+	// 启动第一对连接
+	go func() {
+		defer wg.Done()
+		recv.AcceptWithCid(ctx, recvOneCid, connConfig)
+	}()
+
+	go func() {
+		defer wg.Done()
+		send.ConnectWithCid(ctx, sendOneCid, connConfig)
+	}()
+
+	// 启动第二对连接
+	go func() {
+		defer wg.Done()
+		recv.AcceptWithCid(ctx, recvTwoCid, connConfig)
+	}()
+
+	go func() {
+		defer wg.Done()
+		send.ConnectWithCid(ctx, sendTwoCid, connConfig)
+	}()
+
+	wg.Wait()
+
+	if recv.NumConnections() != 2 {
+		t.Errorf("Expected 2 connections for receiver, got %d", recv.NumConnections())
+	}
+	if send.NumConnections() != 2 {
+		t.Errorf("Expected 2 connections for sender, got %d", send.NumConnections())
+	}
+}
+
 func initiateTransfer(
 	t *testing.T,
 	ctx context.Context,
@@ -125,7 +333,7 @@ func initiateTransfer(
 	// Start receiver goroutine
 	go func() {
 		defer func() {
-			t.Log("wg done")
+			t.Log("writer wg done")
 			wg.Done()
 		}()
 		stream, err := recv.AcceptWithCid(ctx, recvCid, connConfig)
@@ -141,7 +349,7 @@ func initiateTransfer(
 
 		t.Logf("CID send=%d recv=%d read %d bytes from uTP stream",
 			recvCid.Send, recvCid.Recv, n)
-		assert.Equal(t, TEST_SOCKET_DATA_LEN, n,
+		assert.Equal(t, len(data), n,
 			"received wrong number of bytes: got %d, want %d", n, len(data))
 		assert.True(t, bytes.Equal(data, buf),
 			"received data doesn't match sent data")
@@ -150,7 +358,7 @@ func initiateTransfer(
 	// Start sender goroutine
 	go func() {
 		defer func() {
-			t.Log("wg done")
+			t.Log("writer wg done")
 			wg.Done()
 		}()
 		stream, err := send.ConnectWithCid(ctx, sendCid, connConfig)
