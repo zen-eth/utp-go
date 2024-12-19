@@ -77,8 +77,8 @@ func (m *DelayMap[P]) Remove(key any) {
 	log.Debug("delay map key count before", "count", len(m.unacked))
 	if item, ok := m.unacked[key]; ok {
 		item.timer.Stop()
-		delete(m.unacked, key)
 	}
+	delete(m.unacked, key)
 	log.Debug("delay map key count after", "count", len(m.unacked))
 }
 

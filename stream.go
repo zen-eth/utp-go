@@ -139,9 +139,5 @@ func (s *UtpStream) Close() {
 		s.shutdown.Store(true)
 		s.connHandle.Wait()
 		s.streamCancel()
-		close(s.writes)
-		close(s.reads)
-		close(s.streamEvents)
 	})
-
 }
