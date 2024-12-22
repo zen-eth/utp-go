@@ -21,12 +21,12 @@ type UtpStream struct {
 	streamCancel context.CancelFunc
 	logger       log.Logger
 	cid          *ConnectionId
-	reads        chan *ReadOrWriteResult
-	writes       chan *QueuedWrite
+	reads        chan *readOrWriteResult
+	writes       chan *queuedWrite
 	streamEvents chan *StreamEvent
 	shutdown     *atomic.Bool
 	connHandle   *sync.WaitGroup
-	conn         *Connection
+	conn         *connection
 	closeOnce    sync.Once
 }
 
@@ -50,14 +50,14 @@ func NewUtpStream(
 		streamCancel: cancel,
 		logger:       logger,
 		cid:          cid,
-		reads:        make(chan *ReadOrWriteResult, 100),
-		writes:       make(chan *QueuedWrite, 100),
+		reads:        make(chan *readOrWriteResult, 100),
+		writes:       make(chan *queuedWrite, 100),
 		streamEvents: streamEvents,
 		connHandle:   connHandle,
 		shutdown:     &atomic.Bool{},
 	}
 
-	utpStream.conn = NewConnection(streamCtx, logger, cid, config, syn, connected, socketEvents, utpStream.reads)
+	utpStream.conn = newConnection(streamCtx, logger, cid, config, syn, connected, socketEvents, utpStream.reads)
 
 	go utpStream.start()
 	return utpStream
@@ -106,9 +106,9 @@ func (s *UtpStream) Write(ctx context.Context, buf []byte) (int, error) {
 	if s.shutdown.Load() {
 		return 0, ErrNotConnected
 	}
-	resCh := make(chan *ReadOrWriteResult, 1)
+	resCh := make(chan *readOrWriteResult, 1)
 	select {
-	case s.writes <- &QueuedWrite{buf, 0, resCh}:
+	case s.writes <- &queuedWrite{buf, 0, resCh}:
 		s.logger.Debug("created a new queued write to writes channel",
 			"dst.peer", s.cid.Peer,
 			"buf.len", len(buf),

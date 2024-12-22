@@ -15,10 +15,10 @@ const (
 	TEST_DELAYtime   = time.Millisecond * 100
 )
 
-func CreateTestConnection(endpoint Endpoint) *Connection {
+func CreateTestConnection(endpoint Endpoint) *connection {
 	// Create channels
 	socketEvents := make(chan *SocketEvent, 100)
-	reads := make(chan *ReadOrWriteResult, 100)
+	reads := make(chan *readOrWriteResult, 100)
 
 	// Create peer address
 	peer := &TcpPeer{&net.TCPAddr{
@@ -34,7 +34,7 @@ func CreateTestConnection(endpoint Endpoint) *Connection {
 		Peer: peer,
 	}
 
-	conn := &Connection{
+	conn := &connection{
 		logger:         log.Root(),
 		state:          NewConnState(make(chan error, 1)),
 		cid:            &cid,
@@ -46,7 +46,7 @@ func CreateTestConnection(endpoint Endpoint) *Connection {
 		unacked:        NewDelayMap[*Packet](),
 		reads:          reads,
 		readable:       make(chan struct{}, 1),
-		pendingWrites:  make([]*QueuedWrite, 0),
+		pendingWrites:  make([]*queuedWrite, 0),
 		writable:       make(chan struct{}, 1),
 		latestTimeout:  nil,
 	}

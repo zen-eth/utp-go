@@ -184,7 +184,14 @@ func (s *SentPackets) OnAck(
 	// Check if ack number is in valid range
 	seqRange := s.SeqNumRange()
 	if !seqRange.Contains(ackNum) {
-		return nil, nil, ErrInvalidAckNum
+		if len(s.packets) != 0 && seqRange.end == seqRange.start {
+			seqRange = NewCircularRangeInclusive(seqRange.start, seqRange.end-1)
+			if !seqRange.Contains(ackNum) {
+				return nil, nil, ErrInvalidAckNum
+			}
+		} else {
+			return nil, nil, ErrInvalidAckNum
+		}
 	}
 
 	// Do not ACK if ACK num corresponds to initial packet

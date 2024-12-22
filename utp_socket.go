@@ -214,7 +214,9 @@ func (s *UtpSocket) writeLoop() {
 					"packet.Header.Encoded.len", event.Packet.Header.EncodeToBytes(),
 					"packet.Eack.Encoded.len", event.Packet.Eack.EncodedLen())
 			}
+			s.logger.Debug("Send a packet out, end...")
 			s.readNextCh <- struct{}{}
+
 		case SocketShutdown:
 			s.logger.Debug("uTP conn shutdown", "cid.Hash", event.ConnectionId.Hash())
 			s.removeConnStream(event.ConnectionId.Hash())
@@ -228,77 +230,99 @@ func (s *UtpSocket) eventLoop() {
 	defer s.logger.Debug("utp socket eventLoop end...")
 	var n int
 
+	handleIncomingBuf := func(incomingRaw *IncomingPacketRaw) {
+		// Handle incoming packets
+		packetPtr, err := DecodePacket(incomingRaw.payload)
+		if err != nil {
+			s.logger.Warn("Unable to decode uTP packet", "peer", incomingRaw.peer)
+			return
+		}
+
+		n += len(packetPtr.Body)
+		peerInitCID := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeSendIdPeerInitiated)
+		weInitCID := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeSendIdWeInitiated)
+		accCID := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeRecvId)
+		s.logger.Debug("receive incoming packet",
+			"s.incomingBuf.len", len(s.incomingBuf),
+			"src.peer", incomingRaw.peer,
+			"packet.type", packetPtr.Header.PacketType.String(),
+			"packet.cid", packetPtr.Header.ConnectionId,
+			"packet.seqNum", packetPtr.Header.SeqNum,
+			"packet.ackNum", packetPtr.Header.AckNum,
+			"packet.Data.len", len(packetPtr.Body),
+			"count", n)
+		// Look for existing connection
+		if connStream := s.getConnStreamWithCids(accCID, weInitCID, peerInitCID); connStream != nil {
+			connStream <- &StreamEvent{
+				Type:   StreamIncoming,
+				Packet: packetPtr,
+			}
+			s.logger.Debug("put a packet from a exist conn stream to conn stream", "connStream.len", len(connStream))
+		} else {
+			if packetPtr.Header.PacketType == ST_SYN {
+				cid := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeRecvId)
+				s.logger.Debug("receive a syn packet from a new conn stream",
+					"src.peer", incomingRaw.peer,
+					"cid.Send", cid.Send,
+					"cid.Recv", cid.Recv,
+					"cid.hash", cid.Hash())
+				cidHash := cid.Hash()
+				if accept, exist := s.getAwaiting(cidHash); exist {
+					s.logger.Debug("found a accept request from awaiting map...",
+						"accept.cid.Send", accept.cid.Send, "accept.cid.Recv", accept.cid.Recv)
+					connected := make(chan error, 1)
+					newConnStream := make(chan *StreamEvent, 100000)
+					s.putConnStream(cidHash, newConnStream)
+					stream := NewUtpStream(s.ctx, s.logger, cid, accept.config, packetPtr, s.socketEvents, newConnStream, connected)
+					go s.awaitConnected(stream, accept, connected)
+				} else {
+					s.logger.Debug("put a new syn packet to incomingConns...")
+					s.putIncomingConn(cidHash, &IncomingPacket{pkt: packetPtr, cid: cid})
+				}
+			} else {
+				s.logger.Debug("received uTP packet for non-existing conn",
+					"cid", packetPtr.Header.ConnectionId,
+					"packetType", packetPtr.Header.PacketType,
+					"seq", packetPtr.Header.SeqNum,
+					"ack", packetPtr.Header.AckNum,
+					"peerInitCID", peerInitCID,
+					"weInitCid", weInitCID,
+					"accCID", accCID)
+				if packetPtr.Header.PacketType != ST_RESET {
+					randSeqNum := RandomUint16()
+					resetPacket := NewPacketBuilder(ST_RESET, packetPtr.Header.ConnectionId, uint32(time.Now().UnixMicro()), 100_000, randSeqNum).Build()
+					s.socketEvents <- &SocketEvent{Outgoing, resetPacket, incomingRaw.peer}
+				}
+			}
+		}
+	}
+
 	for {
+		select {
+		case incomingRaw := <-s.incomingBuf:
+			handleIncomingBuf(incomingRaw)
+			continue
+		default:
+		}
+		select {
+		case incomingRaw := <-s.incomingBuf:
+			handleIncomingBuf(incomingRaw)
+			continue
+		case acceptWithCid := <-s.acceptsWithCidCh:
+			s.handleNewAcceptWithCidEvent(acceptWithCid)
+			continue
+		//case accept := <-s.accepts:
+		//	s.handleNewAcceptEvent(accept)
+		//	continue
+		default:
+		}
 		select {
 		case acceptWithCid := <-s.acceptsWithCidCh:
 			s.handleNewAcceptWithCidEvent(acceptWithCid)
 		case accept := <-s.accepts:
 			s.handleNewAcceptEvent(accept)
 		case incomingRaw := <-s.incomingBuf:
-			// Handle incoming packets
-			packetPtr, err := DecodePacket(incomingRaw.payload)
-			if err != nil {
-				s.logger.Warn("Unable to decode uTP packet", "peer", incomingRaw.peer)
-				continue
-			}
-
-			n += len(packetPtr.Body)
-			peerInitCID := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeSendIdPeerInitiated)
-			weInitCID := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeSendIdWeInitiated)
-			accCID := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeRecvId)
-			s.logger.Debug("receive incoming packet",
-				"s.incomingBuf.len", len(s.incomingBuf),
-				"src.peer", incomingRaw.peer,
-				"packet.type", packetPtr.Header.PacketType.String(),
-				"packet.cid", packetPtr.Header.ConnectionId,
-				"packet.seqNum", packetPtr.Header.SeqNum,
-				"packet.ackNum", packetPtr.Header.AckNum,
-				"packet.Data.len", len(packetPtr.Body),
-				"count", n)
-			// Look for existing connection
-			if connStream := s.getConnStreamWithCids(accCID, weInitCID, peerInitCID); connStream != nil {
-				connStream <- &StreamEvent{
-					Type:   StreamIncoming,
-					Packet: packetPtr,
-				}
-				s.logger.Debug("put a packet from a exist conn stream to conn stream", "connStream.len", len(connStream))
-			} else {
-				if packetPtr.Header.PacketType == ST_SYN {
-					cid := CidFromPacket(packetPtr, incomingRaw.peer, IdTypeRecvId)
-					s.logger.Debug("receive a syn packet from a new conn stream",
-						"src.peer", incomingRaw.peer,
-						"cid.Send", cid.Send,
-						"cid.Recv", cid.Recv,
-						"cid.hash", cid.Hash())
-					cidHash := cid.Hash()
-					if accept, exist := s.getAwaiting(cidHash); exist {
-						s.logger.Debug("found a accept request from awaiting map...",
-							"accept.cid.Send", accept.cid.Send, "accept.cid.Recv", accept.cid.Recv)
-						connected := make(chan error, 1)
-						newConnStream := make(chan *StreamEvent, 100000)
-						s.putConnStream(cidHash, newConnStream)
-						stream := NewUtpStream(s.ctx, s.logger, cid, accept.config, packetPtr, s.socketEvents, newConnStream, connected)
-						go s.awaitConnected(stream, accept, connected)
-					} else {
-						s.logger.Debug("put a new syn packet to incomingConns...")
-						s.putIncomingConn(cidHash, &IncomingPacket{pkt: packetPtr, cid: cid})
-					}
-				} else {
-					s.logger.Debug("received uTP packet for non-existing conn",
-						"cid", packetPtr.Header.ConnectionId,
-						"packetType", packetPtr.Header.PacketType,
-						"seq", packetPtr.Header.SeqNum,
-						"ack", packetPtr.Header.AckNum,
-						"peerInitCID", peerInitCID,
-						"weInitCid", weInitCID,
-						"accCID", accCID)
-					if packetPtr.Header.PacketType != ST_RESET {
-						randSeqNum := RandomUint16()
-						resetPacket := NewPacketBuilder(ST_RESET, packetPtr.Header.ConnectionId, uint32(time.Now().UnixMicro()), 100_000, randSeqNum).Build()
-						s.socketEvents <- &SocketEvent{Outgoing, resetPacket, incomingRaw.peer}
-					}
-				}
-			}
+			handleIncomingBuf(incomingRaw)
 		case <-s.ctx.Done():
 			return
 		}
@@ -654,7 +678,10 @@ func (s *UtpSocket) getConnStreamWithCids(peerInitCid *ConnectionId, ourInitCid 
 		s.logger.Debug("get conn stream", "accInitCidKey", accCid.Hash(), "accCid.Send", accCid.Send, "accCid.Recv", accCid.Recv)
 		return ch
 	}
-	s.logger.Debug("has no conn stream fit")
+	s.logger.Debug("has no conn stream fit", "peerInitCidKey", peerInitCid.Hash(), "peerInitCid.Send", peerInitCid.Send, "peerInitCid.Recv", peerInitCid.Recv)
+	s.logger.Debug("has no conn stream fit", "ourInitCidKey", ourInitCid.Hash(), "ourInitCid.Send", ourInitCid.Send, "ourInitCid.Recv", ourInitCid.Recv)
+	s.logger.Debug("has no conn stream fit", "accInitCidKey", accCid.Hash(), "accCid.Send", accCid.Send, "accCid.Recv", accCid.Recv)
+	//s.logger.Debug("has no conn stream fit, could generate:", peerInitCid, ourInitCid, accCid)
 	return nil
 }
 

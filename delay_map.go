@@ -57,13 +57,13 @@ func (m *DelayMap[P]) Get(key any) P {
 	return m.unacked[key].Item
 }
 
-func (m *DelayMap[P]) Retain(check func(key any) bool) {
+func (m *DelayMap[P]) Retain(shouldRemove func(key any) bool) {
 	if m.shouldLock {
 		m.unackedMu.Lock()
 		defer m.unackedMu.Unlock()
 	}
 	for k := range m.unacked {
-		if !check(k) {
+		if shouldRemove(k) {
 			m.Remove(k)
 		}
 	}
