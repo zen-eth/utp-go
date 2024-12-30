@@ -40,11 +40,10 @@ type StreamResult struct {
 }
 
 type Accept struct {
-	stream        chan *StreamResult
-	config        *ConnectionConfig
-	cid           *ConnectionId
-	hasCid        bool
-	awaitingTimer *time.Timer
+	stream chan *StreamResult
+	config *ConnectionConfig
+	cid    *ConnectionId
+	hasCid bool
 }
 
 type UdpConn struct {
@@ -144,15 +143,6 @@ func (s *UtpSocket) readLoop() {
 	buf := make([]byte, math.MaxUint16)
 	s.logger.Debug("utp socket readLoop start...")
 	defer s.logger.Debug("utp socket readLoop exit")
-	noReadTimer := time.NewTimer(time.Second * 1)
-	go func() {
-		for {
-			select {
-			case <-noReadTimer.C:
-				s.logger.Debug("no write to socket for 1 second")
-			}
-		}
-	}()
 
 	//for range s.readNextCh {
 	for {
@@ -172,23 +162,11 @@ func (s *UtpSocket) readLoop() {
 		dstBuf := make([]byte, n)
 		copy(dstBuf, buf[:n])
 		s.incomingBuf <- &IncomingPacketRaw{peer: from, payload: dstBuf}
-		noReadTimer.Reset(time.Second * 1)
 		s.logger.Debug("recv a packet from remote", "buf.len", n, "from", from, "s.incomingBuf.len", len(s.incomingBuf))
 	}
 }
 
 func (s *UtpSocket) writeLoop() {
-	noWriteTimer := time.NewTimer(time.Second * 1)
-	go func() {
-		for {
-			select {
-			case <-noWriteTimer.C:
-				s.logger.Debug("no write to socket for 1 second")
-			}
-		}
-	}()
-	//batchCount := 0
-	//const MAX_BATCH_COUNT = 3 * 1024 * 1024
 	for event := range s.socketEvents {
 		s.logger.Debug("a socket event should be sent to target", "event.type", event.Type, "event.cid", event.ConnectionId)
 		switch event.Type {
@@ -208,11 +186,6 @@ func (s *UtpSocket) writeLoop() {
 			} else {
 				peer = event.ConnectionId
 			}
-			noWriteTimer.Reset(time.Second * 1)
-			//if batchCount+len(encoded) >= MAX_BATCH_COUNT {
-			//	time.Sleep(50 * time.Millisecond)
-			//	batchCount = 0
-			//}
 			if _, err := s.socket.WriteTo(encoded, peer); err != nil {
 				s.logger.Debug("Failed to send uTP packet",
 					"error", err,
@@ -471,9 +444,7 @@ func (s *UtpSocket) Accept(ctx context.Context, config *ConnectionConfig) (*UtpS
 	}
 
 	// Send accept request through channel
-	select {
-	case s.accepts <- accept:
-	}
+	s.accepts <- accept
 
 	// Wait for stream or timeout
 	select {
@@ -570,14 +541,12 @@ func (s *UtpSocket) ConnectWithCid(
 		streamEvents,
 		connected,
 	)
-	select {
-	case err := <-connected:
-		if err == nil {
-			return stream, nil
-		} else {
-			s.logger.Error("failed to open connection", "cid.send", cid.Send, "cid.recv", cid.Recv, "cid.peer", cid.Peer.Hash())
-			return nil, fmt.Errorf("connection timed out")
-		}
+	err := <-connected
+	if err == nil {
+		return stream, nil
+	} else {
+		s.logger.Error("failed to open connection", "cid.send", cid.Send, "cid.recv", cid.Recv, "cid.peer", cid.Peer.Hash())
+		return nil, fmt.Errorf("connection timed out")
 	}
 }
 
@@ -600,7 +569,6 @@ func (s *UtpSocket) awaitConnected(
 
 	s.logger.Debug("connected failed", "peer", accept.cid.Peer.Hash(), "cid.Send", accept.cid.Send, "cid.Recv", accept.cid.Recv)
 	accept.stream <- &StreamResult{err: fmt.Errorf("connection aborted")}
-	return
 }
 
 func (s *UtpSocket) selectAcceptHelper(

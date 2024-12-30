@@ -72,7 +72,7 @@ type Controller interface {
 	OnTransmit(seqNum uint16, transmit Transmit, dataLen uint32) error
 	OnAck(seqNum uint16, ack Ack) error
 	OnLostPacket(seqNum uint16, retransmitting bool) error
-	OnTimeout() error
+	OnTimeout()
 	Timeout() time.Duration
 	BytesAvailableInWindow() uint32
 }
@@ -224,10 +224,9 @@ func (c *defaultController) OnLostPacket(seqNum uint16, retransmitting bool) err
 	return nil
 }
 
-func (c *defaultController) OnTimeout() error {
+func (c *defaultController) OnTimeout() {
 	c.maxWindowSizeBytes = c.minWindowSizeBytes
 	c.timeout = time.Duration(math.Min(float64(c.timeout*2), float64(c.maxTimeout)))
-	return nil
 }
 
 // applyMaxWindowSizeAdjustment adjusts the maximum window size based on the given adjustment.
@@ -299,7 +298,6 @@ type delay struct {
 type delayAccumulator struct {
 	delays *delayHeap
 	window time.Duration
-	mu     sync.Mutex
 }
 
 func newDelayAccumulator(window time.Duration) *delayAccumulator {

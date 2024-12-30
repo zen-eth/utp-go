@@ -7,50 +7,6 @@ import (
 	"github.com/valyala/fastrand"
 )
 
-// wrapCompareLess compares if lhs is less than rhs, taking wrapping into account.
-func wrapCompareLessUint32(lhs, rhs uint32) bool {
-	distDown := lhs - rhs
-	distUp := rhs - lhs
-	return distUp < distDown
-}
-
-// wrapCompareLess compares if lhs is less than rhs, taking wrapping into account.
-func wrapCompareLessUint16(lhs, rhs uint16) bool {
-	distDown := lhs - rhs
-	distUp := rhs - lhs
-	return distUp < distDown
-}
-
-// max returns the maximum of two durations.
-func max(a, b time.Duration) time.Duration {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-// min returns the minimum of two durations.
-func min(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxDuration(a, b time.Duration) time.Duration {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func minDuration(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func minInt(a, b int) int {
 	if a < b {
 		return a
@@ -58,42 +14,7 @@ func minInt(a, b int) int {
 	return b
 }
 
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func minUint32(a, b uint32) uint32 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxUint32(a, b uint32) uint32 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func minInt32(a, b int32) int32 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxInt32(a, b int32) int32 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func minInt64(a, b int64) int64 {
 	if a < b {
 		return a
 	}
@@ -130,10 +51,6 @@ func DurationBetween(earlier uint32, later uint32) time.Duration {
 }
 
 var randGenerator = fastrand.RNG{}
-
-func RandomUint32() uint32 {
-	return randGenerator.Uint32()
-}
 
 func RandomUint16() uint16 {
 	return uint16(randGenerator.Uint32n(65535))

@@ -25,14 +25,16 @@ func TestRecvBufferAvailable(t *testing.T) {
 
 	// Write out-of-order packet.
 	seqNum := initSeqNum + 2
-	buf.Write(data, seqNum)
+	err := buf.Write(data, seqNum)
+	require.NoError(t, err, "failed to write data")
 	if buf.Available() != RECV_SIZE-DATA_LEN {
 		t.Errorf("expected available size to be %d, got %d", RECV_SIZE-DATA_LEN, buf.Available())
 	}
 
 	// Write in-order packet.
 	seqNum = initSeqNum + 1
-	buf.Write(data, seqNum)
+	err = buf.Write(data, seqNum)
+	require.NoError(t, err, "failed to write data")
 	if buf.Available() != RECV_SIZE-(DATA_LEN*2) {
 		t.Errorf("expected available size to be %d, got %d", RECV_SIZE-(DATA_LEN*2), buf.Available())
 	}
@@ -62,7 +64,8 @@ func TestWasWritten(t *testing.T) {
 	for i := range data {
 		data[i] = 0xef
 	}
-	buf.Write(data, seqNum)
+	err := buf.Write(data, seqNum)
+	require.NoError(t, err, "failed to write data")
 	if !buf.WasWritten(seqNum) {
 		t.Errorf("expected seqNum %d to be written", seqNum)
 	}
@@ -80,7 +83,8 @@ func TestRecvBufferWrite(t *testing.T) {
 		dataSecond[i] = 0xef
 	}
 	seqNum := initSeqNum + 2
-	buf.Write(dataSecond, seqNum)
+	err := buf.Write(dataSecond, seqNum)
+	require.NoError(t, err, "failed to write data")
 	require.Equal(t, 0, buf.offset)
 	require.Equal(t, uint16(0), buf.consumed)
 	data := buf.pending.Get(&pendingItem{seqNum: seqNum}).(*pendingItem)
@@ -93,7 +97,8 @@ func TestRecvBufferWrite(t *testing.T) {
 		dataFirst[i] = 0xfe
 	}
 	seqNum = initSeqNum + 1
-	buf.Write(dataFirst, seqNum)
+	err = buf.Write(dataFirst, seqNum)
+	require.NoError(t, err, "failed to write data")
 
 	require.Equal(t, DATA_LEN*2, buf.offset)
 	require.Equal(t, uint16(2), buf.consumed)
@@ -128,7 +133,8 @@ func TestRecvBufferRead(t *testing.T) {
 		dataSecond[i] = 0xef
 	}
 	seqNum := initSeqNum + 2
-	buf.Write(dataSecond, seqNum)
+	err := buf.Write(dataSecond, seqNum)
+	require.NoError(t, err, "failed to write data")
 
 	readBuf := make([]byte, RECV_SIZE)
 	n := buf.Read(readBuf)
@@ -142,7 +148,8 @@ func TestRecvBufferRead(t *testing.T) {
 		dataFirst[i] = 0xfe
 	}
 	seqNum = initSeqNum + 1
-	buf.Write(dataFirst, seqNum)
+	err = buf.Write(dataFirst, seqNum)
+	require.NoError(t, err, "failed to write data")
 
 	n = buf.Read(readBuf)
 	if n != DATA_LEN*2 {
@@ -177,7 +184,8 @@ func TestAckNum(t *testing.T) {
 
 	// Write out-of-order packet.
 	secondSeqNum := initSeqNum + 2
-	buf.Write(data, secondSeqNum)
+	err := buf.Write(data, secondSeqNum)
+	require.NoError(t, err, "failed to write data to receive buffer")
 
 	if buf.AckNum() != initSeqNum {
 		t.Errorf("expected ackNum to be %d, got %d", initSeqNum, buf.AckNum())
@@ -185,7 +193,8 @@ func TestAckNum(t *testing.T) {
 
 	// Write in-order packet.
 	firstSeqNum := initSeqNum + 1
-	buf.Write(data, firstSeqNum)
+	err = buf.Write(data, firstSeqNum)
+	require.NoError(t, err, "failed to write data to receive buffer")
 
 	if buf.AckNum() != secondSeqNum {
 		t.Errorf("expected ackNum to be %d, got %d", secondSeqNum, buf.AckNum())
@@ -209,7 +218,8 @@ func TestSelectiveAck(t *testing.T) {
 
 	// Write out-of-order packet.
 	seqNum := initSeqNum + 2
-	buf.Write(data, seqNum)
+	err := buf.Write(data, seqNum)
+	require.NoError(t, err, "failed to write data to receive buffer")
 
 	selectiveAck = buf.SelectiveAck()
 	if selectiveAck == nil || !selectiveAck.Acked()[0] {
@@ -218,7 +228,8 @@ func TestSelectiveAck(t *testing.T) {
 
 	// Write in-order packet.
 	seqNum = initSeqNum + 1
-	buf.Write(data, seqNum)
+	err = buf.Write(data, seqNum)
+	require.NoError(t, err, "failed to write data to receive buffer")
 
 	selectiveAck = buf.SelectiveAck()
 	if selectiveAck != nil {

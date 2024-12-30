@@ -105,15 +105,13 @@ func (s *UtpStream) Write(ctx context.Context, buf []byte) (int, error) {
 		return 0, ErrNotConnected
 	}
 	resCh := make(chan *readOrWriteResult, 1)
-	select {
-	case s.writes <- &queuedWrite{buf, 0, resCh}:
-		s.logger.Debug("created a new queued write to writes channel",
-			"dst.peer", s.cid.Peer,
-			"buf.len", len(buf),
-			"len(s.writes)", len(s.writes),
-			"ptr(s)", fmt.Sprintf("%p", s),
-			"ptr(writes)", fmt.Sprintf("%p", s.writes))
-	}
+	s.writes <- &queuedWrite{buf, 0, resCh}
+	s.logger.Debug("created a new queued write to writes channel",
+		"dst.peer", s.cid.Peer,
+		"buf.len", len(buf),
+		"len(s.writes)", len(s.writes),
+		"ptr(s)", fmt.Sprintf("%p", s),
+		"ptr(writes)", fmt.Sprintf("%p", s.writes))
 
 	var writtenLen int
 	var err error

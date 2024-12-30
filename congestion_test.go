@@ -216,8 +216,7 @@ func TestOnTimeout(t *testing.T) {
 	initialTimeout := ctrl.Timeout()
 
 	// Register timeout
-	err := ctrl.OnTimeout()
-	require.NoError(t, err, "timeout registration failed")
+	ctrl.OnTimeout()
 
 	// Verify max window size was reset to minimum
 	require.Equal(t, ctrl.minWindowSizeBytes, ctrl.maxWindowSizeBytes,
@@ -237,8 +236,7 @@ func TestOnTimeoutNotExceedMax(t *testing.T) {
 	ctrl := newDefaultController(config)
 
 	// Register timeout
-	err := ctrl.OnTimeout()
-	require.NoError(t, err, "timeout registration failed")
+	ctrl.OnTimeout()
 
 	// Verify timeout is capped at max
 	require.Equal(t, config.MaxTimeout, ctrl.Timeout(),

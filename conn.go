@@ -198,12 +198,10 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 	if c.endpoint.Type == Initiator {
 		synSeqNum := c.endpoint.SynNum
 		synPkt := c.synPacket(synSeqNum)
-		select {
-		case c.socketEvents <- &socketEvent{
+		c.socketEvents <- &socketEvent{
 			Type:         outgoing,
 			Packet:       synPkt,
 			ConnectionId: c.cid,
-		}:
 		}
 		c.logger.Debug("put a initial syn packet to delay map", "socketEvents.len", len(c.socketEvents), "dst.peer", c.cid.Peer, "synSeqNum", synSeqNum)
 		c.unacked.Put(synSeqNum, synPkt, c.config.InitialTimeout)
@@ -399,7 +397,7 @@ func (c *connection) shutdown() {
 				fin := NewPacketBuilder(
 					st_fin,
 					c.cid.Send,
-					uint32(time.Now().UnixMicro()),
+					NowMicro(),
 					recvWindow,
 					seqNum,
 				).WithAckNum(ackNum).WithSelectiveAck(selectiveAck).Build()
@@ -419,7 +417,7 @@ func (c *connection) shutdown() {
 				fin := NewPacketBuilder(
 					st_fin,
 					c.cid.Send,
-					uint32(time.Now().UnixMicro()),
+					NowMicro(),
 					recvWindow,
 					seqNum,
 				).WithAckNum(ackNum).
@@ -441,9 +439,6 @@ func (c *connection) shutdown() {
 }
 
 func (c *connection) processWrites(now time.Time) {
-	c.logger.Debug("processWrites start....", "now", now)
-	defer c.logger.Debug("processWrites end....", "duration", time.Since(now))
-
 	switch c.state.stateType {
 	case ConnConnecting:
 		c.logger.Debug("waiting for connection to be established")
@@ -461,7 +456,6 @@ func (c *connection) processWrites(now time.Time) {
 	}
 
 	// Compose data packets
-	nowMicros := time.Now().UnixMicro()
 	windowSize := minUint32(c.state.SentPackets.Window(), c.peerRecvWindow)
 	var payloads [][]byte
 
@@ -517,7 +511,7 @@ func (c *connection) processWrites(now time.Time) {
 		packetInst := NewPacketBuilder(
 			st_data,
 			c.cid.Send,
-			uint32(nowMicros),
+			NowMicro(),
 			recvWindow,
 			seqNum,
 		).WithPayload(payload).WithTsDiffMicros(uint32(c.peerTsDiff.Microseconds())).WithAckNum(ackNum).WithSelectiveAck(selectiveAck).Build()
@@ -528,8 +522,6 @@ func (c *connection) processWrites(now time.Time) {
 }
 
 func (c *connection) onWrite(writeReq *queuedWrite) {
-	currentTime := time.Now()
-	defer c.logger.Debug("On write end...", "duration", time.Since(currentTime))
 	writeReq.written = 0
 	switch c.state.stateType {
 	case ConnConnecting:
@@ -703,7 +695,6 @@ func (c *connection) onPacket(packet *Packet, now time.Time) {
 		"packet.acknum", packet.Header.AckNum,
 		"packet.windowSize", packet.Header.WndSize,
 		"now", now)
-	defer c.logger.Debug("on packet end...", "now", now, "duration", time.Since(now))
 	nowMicros := time.Now().UnixMicro()
 	c.peerRecvWindow = packet.Header.WndSize
 
@@ -764,9 +755,7 @@ func (c *connection) onPacket(packet *Packet, now time.Time) {
 				Packet:       statePacket,
 				ConnectionId: c.cid,
 			}
-			select {
-			case c.socketEvents <- &event:
-			}
+			c.socketEvents <- &event
 		}
 	}
 

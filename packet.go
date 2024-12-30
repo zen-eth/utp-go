@@ -40,7 +40,7 @@ var (
 type PacketType byte
 
 func (p PacketType) Check() error {
-	if p > 4 || p < 0 {
+	if p > 4 {
 		return ErrInvalidPacketType
 	}
 	return nil

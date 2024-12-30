@@ -243,7 +243,8 @@ func TestOnFinClosing(t *testing.T) {
 
 	// Step 4: Test remote fin
 	remoteFin := syn + 3
-	conn.onFin(remoteFin, []byte{})
+	err := conn.onFin(remoteFin, []byte{})
+	require.NoError(t, err, "expected no error")
 
 	// Step 5: Verify state
 	require.Equal(t, ConnConnected, conn.state.stateType,
