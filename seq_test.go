@@ -8,7 +8,7 @@ import (
 
 func TestContainsStart(t *testing.T) {
 	prop := func(start, end uint16) bool {
-		rangeInclusive := NewCircularRangeInclusive(start, end)
+		rangeInclusive := newCircularRangeInclusive(start, end)
 		return rangeInclusive.Contains(start)
 	}
 
@@ -19,7 +19,7 @@ func TestContainsStart(t *testing.T) {
 
 func TestContainsEnd(t *testing.T) {
 	prop := func(start, end uint16) bool {
-		rangeInclusive := NewCircularRangeInclusive(start, end)
+		rangeInclusive := newCircularRangeInclusive(start, end)
 		return rangeInclusive.Contains(end)
 	}
 
@@ -30,7 +30,7 @@ func TestContainsEnd(t *testing.T) {
 
 func TestIterator(t *testing.T) {
 	prop := func(start, end uint16) bool {
-		rangeInclusive := NewCircularRangeInclusive(start, end)
+		rangeInclusive := newCircularRangeInclusive(start, end)
 
 		var length int
 		expectedIdx := start
@@ -65,7 +65,7 @@ func TestIterator(t *testing.T) {
 
 func TestIteratorSingle(t *testing.T) {
 	prop := func(x uint16) bool {
-		rangeInclusive := NewCircularRangeInclusive(x, x)
+		rangeInclusive := newCircularRangeInclusive(x, x)
 		val, ok := rangeInclusive.Next()
 		if !ok || val != x {
 			t.Errorf("Expected %v, got %v", x, val)

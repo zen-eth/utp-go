@@ -1,4 +1,4 @@
-module github.com/optimism-java/utp-go
+module github.com/zen-eth/utp-go
 
 go 1.23.1
 

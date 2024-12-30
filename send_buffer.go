@@ -1,20 +1,20 @@
 package utp_go
 
-type SendBuffer struct {
+type sendBuffer struct {
 	pending [][]byte
 	offset  int
 	size    int
 }
 
-func NewSendBuffer(size int) *SendBuffer {
-	return &SendBuffer{
+func newSendBuffer(size int) *sendBuffer {
+	return &sendBuffer{
 		pending: make([][]byte, 0),
 		offset:  0,
 		size:    size,
 	}
 }
 
-func (sb *SendBuffer) Available() int {
+func (sb *sendBuffer) Available() int {
 	used := 0
 	for _, data := range sb.pending {
 		used += len(data)
@@ -22,11 +22,11 @@ func (sb *SendBuffer) Available() int {
 	return sb.size + sb.offset - used
 }
 
-func (sb *SendBuffer) IsEmpty() bool {
+func (sb *sendBuffer) IsEmpty() bool {
 	return len(sb.pending) == 0
 }
 
-func (sb *SendBuffer) Write(data []byte) int {
+func (sb *sendBuffer) Write(data []byte) int {
 	available := sb.Available()
 	if len(data) <= available {
 		sb.pending = append(sb.pending, data)
@@ -37,7 +37,7 @@ func (sb *SendBuffer) Write(data []byte) int {
 	}
 }
 
-func (sb *SendBuffer) Read(buf []byte) int {
+func (sb *sendBuffer) Read(buf []byte) int {
 	if len(buf) == 0 {
 		return 0
 	}

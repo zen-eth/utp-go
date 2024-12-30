@@ -17,7 +17,7 @@ func TestNextSeqNum(t *testing.T) {
 }
 
 func TestOnTransmitInitial(t *testing.T) {
-	ctrl := NewDefaultController(FromConnConfig(NewConnectionConfig()))
+	ctrl := newDefaultController(fromConnConfig(NewConnectionConfig()))
 
 	initSeqNum := uint16(math.MaxUint16)
 	sentPackets := NewSentPackets(initSeqNum, ctrl)
@@ -26,7 +26,7 @@ func TestOnTransmitInitial(t *testing.T) {
 	data := []byte{0}
 	length := uint32(len(data))
 	now := time.Now()
-	sentPackets.OnTransmit(seqNum, ST_DATA, data, length, now)
+	sentPackets.OnTransmit(seqNum, st_data, data, length, now)
 
 	if len(sentPackets.packets) != 1 {
 		t.Errorf("expected 1 packet, got %d", len(sentPackets.packets))
@@ -49,7 +49,7 @@ func TestOnTransmitInitial(t *testing.T) {
 
 func TestOnTransmitRetransmit(t *testing.T) {
 	initSeqNum := uint16(math.MaxUint16)
-	ctrl := NewDefaultController(FromConnConfig(NewConnectionConfig()))
+	ctrl := newDefaultController(fromConnConfig(NewConnectionConfig()))
 	sentPackets := NewSentPackets(initSeqNum, ctrl)
 
 	seqNum := sentPackets.NextSeqNum()
@@ -58,8 +58,8 @@ func TestOnTransmitRetransmit(t *testing.T) {
 	first := time.Now()
 	second := time.Now()
 
-	sentPackets.OnTransmit(seqNum, ST_DATA, data, length, first)
-	sentPackets.OnTransmit(seqNum, ST_DATA, data, length, second)
+	sentPackets.OnTransmit(seqNum, st_data, data, length, first)
+	sentPackets.OnTransmit(seqNum, st_data, data, length, second)
 
 	if len(sentPackets.packets) != 1 {
 		t.Errorf("expected 1 packet, got %d", len(sentPackets.packets))
@@ -86,7 +86,7 @@ func TestOnTransmitRetransmit(t *testing.T) {
 func TestOnTransmitOutOfOrder(t *testing.T) {
 	initSeqNum := uint16(math.MaxUint16)
 
-	ctrl := NewDefaultController(FromConnConfig(NewConnectionConfig()))
+	ctrl := newDefaultController(fromConnConfig(NewConnectionConfig()))
 	sentPackets := NewSentPackets(initSeqNum, ctrl)
 
 	outOfOrderSeqNum := initSeqNum + 2 // wrapping addition for uint16
@@ -101,7 +101,7 @@ func TestOnTransmitOutOfOrder(t *testing.T) {
 		}
 	}()
 
-	sentPackets.OnTransmit(outOfOrderSeqNum, ST_DATA, data, length, now)
+	sentPackets.OnTransmit(outOfOrderSeqNum, st_data, data, length, now)
 }
 
 func TestOnSelectiveAck(t *testing.T) {
@@ -111,7 +111,7 @@ func TestOnSelectiveAck(t *testing.T) {
 		DELAY    = time.Millisecond * 100 // Assuming this value
 	)
 
-	ctrl := NewDefaultController(FromConnConfig(NewConnectionConfig()))
+	ctrl := newDefaultController(fromConnConfig(NewConnectionConfig()))
 
 	initSeqNum := uint16(math.MaxUint16)
 	sentPackets := NewSentPackets(initSeqNum, ctrl)
@@ -123,7 +123,7 @@ func TestOnSelectiveAck(t *testing.T) {
 	for i := 0; i < COUNT; i++ {
 		now := time.Now()
 		seqNum := sentPackets.NextSeqNum()
-		sentPackets.OnTransmit(seqNum, ST_DATA, data, length, now)
+		sentPackets.OnTransmit(seqNum, st_data, data, length, now)
 	}
 
 	// Create selective ACK
@@ -178,7 +178,7 @@ func TestDetectLostPackets(t *testing.T) {
 	for i := 0; i < COUNT; i++ {
 		now := time.Now()
 		seqNum := sentPackets.NextSeqNum()
-		sentPackets.OnTransmit(seqNum, ST_DATA, data, length, now)
+		sentPackets.OnTransmit(seqNum, st_data, data, length, now)
 
 		if i >= START {
 			err := sentPackets.Ack(seqNum, DELAY, now)
@@ -218,10 +218,10 @@ func TestAck(t *testing.T) {
 	data := []byte{0}
 	length := uint32(len(data))
 	now := time.Now()
-	sentPackets.OnTransmit(seqNum, ST_DATA, data, length, now)
+	sentPackets.OnTransmit(seqNum, st_data, data, length, now)
 
 	// Artificially insert packet into lost packets
-	sentPackets.lostPackets = append(sentPackets.lostPackets, seqNum)
+	sentPackets.lostPackets.ReplaceOrInsert(seqNum)
 
 	// Acknowledge the packet
 	now = time.Now()
@@ -238,11 +238,13 @@ func TestAck(t *testing.T) {
 		t.Errorf("expected ack time %v, got %v", now, packetInst.acks[0])
 	}
 
-	for _, lostSeq := range sentPackets.lostPackets {
-		if found := packetInst.seqNum == lostSeq; found {
+	sentPackets.lostPackets.Ascend(func(lostSeq uint16) bool {
+		if lostSeq == packetInst.seqNum {
 			t.Error("packet should not be marked as lost")
+			return false
 		}
-	}
+		return true
+	})
 }
 
 func TestAckPriorUnacked(t *testing.T) {
@@ -268,7 +270,7 @@ func TestAckPriorUnacked(t *testing.T) {
 	for i := 0; i < COUNT; i++ {
 		now := time.Now()
 		seqNum := sentPackets.NextSeqNum()
-		sentPackets.OnTransmit(seqNum, ST_DATA, data, length, now)
+		sentPackets.OnTransmit(seqNum, st_data, data, length, now)
 	}
 
 	// Verify test preconditions

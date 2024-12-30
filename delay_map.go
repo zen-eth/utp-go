@@ -7,7 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
-type DelayMap[P any] struct {
+type delayMap[P any] struct {
 	unackedMu     sync.Mutex
 	unacked       map[any]*delayItem[P]
 	itemTimeoutCh chan *delayItem[P]
@@ -20,19 +20,19 @@ type delayItem[P any] struct {
 	timer *time.Timer
 }
 
-func NewDelayMap[P any]() *DelayMap[P] {
-	return &DelayMap[P]{
+func newDelayMap[P any]() *delayMap[P] {
+	return &delayMap[P]{
 		unacked:       make(map[any]*delayItem[P]),
 		itemTimeoutCh: make(chan *delayItem[P], 100),
 		shouldLock:    false,
 	}
 }
 
-func (m *DelayMap[P]) timeoutCh() chan *delayItem[P] {
+func (m *delayMap[P]) timeoutCh() chan *delayItem[P] {
 	return m.itemTimeoutCh
 }
 
-func (m *DelayMap[P]) Put(key any, value P, timeout time.Duration) {
+func (m *delayMap[P]) Put(key any, value P, timeout time.Duration) {
 	if m.shouldLock {
 		m.unackedMu.Lock()
 		defer m.unackedMu.Unlock()
@@ -49,7 +49,7 @@ func (m *DelayMap[P]) Put(key any, value P, timeout time.Duration) {
 	m.unacked[key] = item
 }
 
-func (m *DelayMap[P]) Get(key any) P {
+func (m *delayMap[P]) Get(key any) P {
 	if m.shouldLock {
 		m.unackedMu.Lock()
 		defer m.unackedMu.Unlock()
@@ -57,7 +57,7 @@ func (m *DelayMap[P]) Get(key any) P {
 	return m.unacked[key].Item
 }
 
-func (m *DelayMap[P]) Retain(shouldRemove func(key any) bool) {
+func (m *delayMap[P]) Retain(shouldRemove func(key any) bool) {
 	if m.shouldLock {
 		m.unackedMu.Lock()
 		defer m.unackedMu.Unlock()
@@ -69,7 +69,7 @@ func (m *DelayMap[P]) Retain(shouldRemove func(key any) bool) {
 	}
 }
 
-func (m *DelayMap[P]) Remove(key any) {
+func (m *delayMap[P]) Remove(key any) {
 	if m.shouldLock {
 		m.unackedMu.Lock()
 		defer m.unackedMu.Unlock()
@@ -82,7 +82,7 @@ func (m *DelayMap[P]) Remove(key any) {
 	log.Debug("delay map key count after", "count", len(m.unacked))
 }
 
-func (m *DelayMap[P]) Keys() []any {
+func (m *delayMap[P]) Keys() []any {
 	if m.shouldLock {
 		m.unackedMu.Lock()
 		defer m.unackedMu.Unlock()

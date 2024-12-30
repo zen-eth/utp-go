@@ -11,7 +11,7 @@ const RECV_SIZE = 1024
 
 func TestRecvBufferAvailable(t *testing.T) {
 	initSeqNum := uint16(0xFFFF)
-	buf := NewReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
 
 	if buf.Available() != RECV_SIZE {
 		t.Errorf("expected available size to be %d, got %d", RECV_SIZE, buf.Available())
@@ -50,7 +50,7 @@ func TestRecvBufferAvailable(t *testing.T) {
 
 func TestWasWritten(t *testing.T) {
 	initSeqNum := uint16(0xFFFF)
-	buf := NewReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
 
 	seqNum := initSeqNum + 2
 	if buf.WasWritten(seqNum) {
@@ -70,7 +70,7 @@ func TestWasWritten(t *testing.T) {
 
 func TestRecvBufferWrite(t *testing.T) {
 	initSeqNum := uint16(0xFFFF)
-	buf := NewReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
 
 	const DATA_LEN = 256
 
@@ -83,9 +83,9 @@ func TestRecvBufferWrite(t *testing.T) {
 	buf.Write(dataSecond, seqNum)
 	require.Equal(t, 0, buf.offset)
 	require.Equal(t, uint16(0), buf.consumed)
-	data, exist := buf.pending[seqNum]
-	require.True(t, exist)
-	require.True(t, bytes.Equal(dataSecond, data))
+	data := buf.pending.Get(&pendingItem{seqNum: seqNum}).(*pendingItem)
+	require.NotNil(t, data)
+	require.True(t, bytes.Equal(dataSecond, data.data))
 
 	// Write in-order packet.
 	dataFirst := make([]byte, DATA_LEN)
@@ -97,7 +97,7 @@ func TestRecvBufferWrite(t *testing.T) {
 
 	require.Equal(t, DATA_LEN*2, buf.offset)
 	require.Equal(t, uint16(2), buf.consumed)
-	require.Equal(t, 0, len(buf.pending))
+	require.Equal(t, 0, buf.pending.Len())
 	require.True(t, bytes.Equal(dataFirst, buf.buf[:DATA_LEN]))
 	require.True(t, bytes.Equal(dataSecond, buf.buf[DATA_LEN:DATA_LEN*2]))
 }
@@ -105,7 +105,7 @@ func TestRecvBufferWrite(t *testing.T) {
 func TestRecvBufferWriteExceedsAvailable(t *testing.T) {
 
 	initSeqNum := uint16(0xFFFF)
-	buf := NewReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
 
 	seqNum := initSeqNum + 1
 	data := make([]byte, RECV_SIZE+1)
@@ -118,7 +118,7 @@ func TestRecvBufferWriteExceedsAvailable(t *testing.T) {
 
 func TestRecvBufferRead(t *testing.T) {
 	initSeqNum := uint16(0xFFFF)
-	buf := NewReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
 
 	const DATA_LEN = 256
 
@@ -163,7 +163,7 @@ func TestRecvBufferRead(t *testing.T) {
 
 func TestAckNum(t *testing.T) {
 	initSeqNum := uint16(0xFFFF)
-	buf := NewReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
 
 	if buf.AckNum() != initSeqNum {
 		t.Errorf("expected ackNum to be %d, got %d", initSeqNum, buf.AckNum())
@@ -194,7 +194,7 @@ func TestAckNum(t *testing.T) {
 
 func TestSelectiveAck(t *testing.T) {
 	initSeqNum := uint16(0xFFFF)
-	buf := NewReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
 
 	selectiveAck := buf.SelectiveAck()
 	if selectiveAck != nil {

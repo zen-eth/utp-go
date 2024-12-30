@@ -8,7 +8,7 @@ import (
 const SIZE = 8192
 
 func TestAvailable(t *testing.T) {
-	buf := NewSendBuffer(SIZE)
+	buf := newSendBuffer(SIZE)
 	if buf.Available() != SIZE {
 		t.Errorf("Expected available size %d, got %d", SIZE, buf.Available())
 	}
@@ -43,7 +43,7 @@ func TestAvailable(t *testing.T) {
 }
 
 func TestRead(t *testing.T) {
-	buf := NewSendBuffer(SIZE)
+	buf := newSendBuffer(SIZE)
 
 	// Read of empty buffer returns zero.
 	readBuf := make([]byte, SIZE)
@@ -90,7 +90,7 @@ func TestRead(t *testing.T) {
 }
 
 func TestWrite(t *testing.T) {
-	buf := NewSendBuffer(SIZE)
+	buf := newSendBuffer(SIZE)
 
 	const WRITE_LEN = 1024
 

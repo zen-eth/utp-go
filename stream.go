@@ -10,8 +10,6 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
-const BUF = 1024 * 1024
-
 var (
 	ErrNotConnected = errors.New("not connected")
 )
@@ -23,7 +21,7 @@ type UtpStream struct {
 	cid          *ConnectionId
 	reads        chan *readOrWriteResult
 	writes       chan *queuedWrite
-	streamEvents chan *StreamEvent
+	streamEvents chan *streamEvent
 	shutdown     *atomic.Bool
 	connHandle   *sync.WaitGroup
 	conn         *connection
@@ -36,8 +34,8 @@ func NewUtpStream(
 	cid *ConnectionId,
 	config *ConnectionConfig,
 	syn *Packet,
-	socketEvents chan *SocketEvent,
-	streamEvents chan *StreamEvent,
+	socketEvents chan *socketEvent,
+	streamEvents chan *streamEvent,
 	connected chan error,
 ) *UtpStream {
 	logger.Debug("new a utp stream", "dst.peer", cid.Peer, "dst.send", cid.Send, "dst.recv", cid.Recv)
@@ -70,7 +68,7 @@ func (s *UtpStream) Cid() *ConnectionId {
 func (s *UtpStream) start() {
 	defer s.connHandle.Done()
 
-	err := s.conn.EventLoop(s)
+	err := s.conn.eventLoop(s)
 	if err != nil {
 		s.logger.Error("utp stream evenLoop has error and return", "err", err)
 	}

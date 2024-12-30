@@ -17,7 +17,7 @@ const (
 
 func CreateTestConnection(endpoint Endpoint) *connection {
 	// Create channels
-	socketEvents := make(chan *SocketEvent, 100)
+	socketEvents := make(chan *socketEvent, 100)
 	reads := make(chan *readOrWriteResult, 100)
 
 	// Create peer address
@@ -43,7 +43,7 @@ func CreateTestConnection(endpoint Endpoint) *connection {
 		peerTsDiff:     100 * time.Millisecond,
 		peerRecvWindow: math.MaxUint32,
 		socketEvents:   socketEvents,
-		unacked:        NewDelayMap[*Packet](),
+		unacked:        newDelayMap[*Packet](),
 		reads:          reads,
 		readable:       make(chan struct{}, 1),
 		pendingWrites:  make([]*queuedWrite, 0),
@@ -62,7 +62,7 @@ func TestOnSynInitiator(t *testing.T) {
 	}
 	conn := CreateTestConnection(endpoint)
 
-	conn.OnSyn(syn)
+	conn.onSyn(syn)
 
 	require.Equal(t, ConnClosed, conn.state.stateType, "expected state to be closed")
 	require.ErrorIs(t, conn.state.Err, ErrSynFromAcceptor, "expected error to be %v, got %v", ErrSynFromAcceptor, conn.state.Err)
@@ -80,7 +80,7 @@ func TestOnSynAcceptor(t *testing.T) {
 
 	conn := CreateTestConnection(endpoint)
 
-	conn.OnSyn(syn)
+	conn.onSyn(syn)
 	require.Equal(t, ConnConnecting, conn.state.stateType, "expected state to be connecting, got %v", conn.state.stateType)
 }
 
@@ -97,7 +97,7 @@ func TestOnSynAcceptorNonMatchingSyn(t *testing.T) {
 
 	// Step 2: Try with different syn value
 	altSyn := uint16(128)
-	conn.OnSyn(altSyn)
+	conn.onSyn(altSyn)
 	require.Equal(t, ConnClosed, conn.state.stateType,
 		"expected state to be closed, got %v", conn.state.stateType)
 	require.ErrorIs(t, conn.state.Err, ErrInvalidSyn,
@@ -115,7 +115,7 @@ func TestOnStateConnectingInitiator(t *testing.T) {
 
 	// Test
 	seqNum := uint16(1)
-	conn.OnState(seqNum, syn)
+	conn.onState(seqNum, syn)
 
 	// Verify
 	require.Equal(t, ConnConnected, conn.state.stateType,
@@ -135,7 +135,7 @@ func TestOnPacketInvalidAckNum(t *testing.T) {
 	conn := CreateTestConnection(endpoint)
 
 	// Setup congestion control
-	congestionCtrl := NewDefaultController(FromConnConfig(conn.config))
+	congestionCtrl := newDefaultController(fromConnConfig(conn.config))
 	sentPackets := NewSentPackets(synAck, congestionCtrl)
 
 	// Send a packet
@@ -144,15 +144,15 @@ func TestOnPacketInvalidAckNum(t *testing.T) {
 	now := time.Now()
 	sentPackets.OnTransmit(
 		synAck+1,
-		ST_DATA,
+		st_data,
 		data,
 		length,
 		now,
 	)
 
 	// Setup buffers and state
-	sendBuf := NewSendBuffer(TEST_BUFFER_SIZE)
-	recvBuf := NewReceiveBuffer(TEST_BUFFER_SIZE, syn)
+	sendBuf := newSendBuffer(TEST_BUFFER_SIZE)
+	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, syn)
 
 	conn.state = &ConnState{
 		stateType:   ConnConnected,
@@ -163,13 +163,13 @@ func TestOnPacketInvalidAckNum(t *testing.T) {
 
 	// Process invalid ack
 	delay := 100 * time.Millisecond
-	ackResult := conn.ProcessAck(synAck+2, nil, delay, now)
+	ackResult := conn.processAck(synAck+2, nil, delay, now)
 
 	// Verify results
 	require.Equal(t, ConnClosed, conn.state.stateType, "expected state to be closed")
 	require.ErrorIs(t, conn.state.Err, ErrInvalidAckNum, "expected error to be %v, got %v", ErrInvalidAckNum, conn.state.Err)
 
-	require.Error(t, ackResult, "expected ProcessAck to return an error")
+	require.Error(t, ackResult, "expected processAck to return an error")
 }
 
 func TestOnFinEstablished(t *testing.T) {
@@ -184,10 +184,10 @@ func TestOnFinEstablished(t *testing.T) {
 	conn := CreateTestConnection(endpoint)
 
 	// Create buffers and controllers
-	sendBuf := NewSendBuffer(TEST_BUFFER_SIZE)
-	congestionCtrl := NewDefaultController(FromConnConfig(conn.config))
+	sendBuf := newSendBuffer(TEST_BUFFER_SIZE)
+	congestionCtrl := newDefaultController(fromConnConfig(conn.config))
 	sentPackets := NewSentPackets(synAck, congestionCtrl)
-	recvBuf := NewReceiveBuffer(TEST_BUFFER_SIZE, syn)
+	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, syn)
 
 	// Set connected state
 	conn.state = &ConnState{
@@ -199,7 +199,7 @@ func TestOnFinEstablished(t *testing.T) {
 
 	// Test FIN
 	fin := syn + 3 // wrapping add in Go handles overflow automatically
-	err := conn.OnFin(fin, []byte{})
+	err := conn.onFin(fin, []byte{})
 	require.NoError(t, err, "expected no error")
 
 	// Verify state
@@ -223,10 +223,10 @@ func TestOnFinClosing(t *testing.T) {
 	conn := CreateTestConnection(endpoint)
 
 	// Step 2: Setup buffers and controllers
-	sendBuf := NewSendBuffer(TEST_BUFFER_SIZE)
-	congestionCtrl := NewDefaultController(FromConnConfig(conn.config))
+	sendBuf := newSendBuffer(TEST_BUFFER_SIZE)
+	congestionCtrl := newDefaultController(fromConnConfig(conn.config))
 	sentPackets := NewSentPackets(synAck, congestionCtrl)
-	recvBuf := NewReceiveBuffer(TEST_BUFFER_SIZE, syn)
+	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, syn)
 
 	// Step 3: Set local fin
 	localFin := synAck + 3
@@ -243,7 +243,7 @@ func TestOnFinClosing(t *testing.T) {
 
 	// Step 4: Test remote fin
 	remoteFin := syn + 3
-	conn.OnFin(remoteFin, []byte{})
+	conn.onFin(remoteFin, []byte{})
 
 	// Step 5: Verify state
 	require.Equal(t, ConnConnected, conn.state.stateType,
@@ -269,10 +269,10 @@ func TestOnFinClosingNonMatchingFin(t *testing.T) {
 	conn := CreateTestConnection(endpoint)
 
 	// Step 2: Setup buffers
-	sendBuf := NewSendBuffer(TEST_BUFFER_SIZE)
-	congestionCtrl := NewDefaultController(FromConnConfig(conn.config))
+	sendBuf := newSendBuffer(TEST_BUFFER_SIZE)
+	congestionCtrl := newDefaultController(fromConnConfig(conn.config))
 	sentPackets := NewSentPackets(synAck, congestionCtrl)
-	recvBuf := NewReceiveBuffer(TEST_BUFFER_SIZE, syn)
+	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, syn)
 
 	// Step 3: Set initial fin
 	fin := syn + 3
@@ -289,7 +289,7 @@ func TestOnFinClosingNonMatchingFin(t *testing.T) {
 
 	// Step 4: Test with different fin
 	altFin := fin + 1
-	err := conn.OnFin(altFin, []byte{})
+	err := conn.onFin(altFin, []byte{})
 	require.NoError(t, err, "expected no error")
 
 	// Step 5: Verify error state
@@ -308,7 +308,7 @@ func TestOnResetNonClosed(t *testing.T) {
 	conn := CreateTestConnection(endpoint)
 
 	// Test reset
-	conn.OnReset()
+	conn.onReset()
 
 	// Verify state
 	require.Equal(t, ConnClosed, conn.state.stateType, "expected state to be closed")
@@ -330,7 +330,7 @@ func TestOnResetClosed(t *testing.T) {
 	}
 
 	// Test reset
-	conn.OnReset()
+	conn.onReset()
 
 	// Verify state remains unchanged
 	require.Equal(t, ConnClosed, conn.state.stateType, "expected state to be closed")

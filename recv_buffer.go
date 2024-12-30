@@ -16,16 +16,16 @@ type ReceiveBuffer struct {
 	consumed   uint16
 }
 
-type PendingItem struct {
+type pendingItem struct {
 	seqNum uint16
 	data   []byte
 }
 
-func (i *PendingItem) Less(other btree.Item) bool {
-	return i.seqNum < other.(*PendingItem).seqNum
+func (i *pendingItem) Less(other btree.Item) bool {
+	return i.seqNum < other.(*pendingItem).seqNum
 }
 
-func NewReceiveBuffer(size int, initSeqNum uint16) *ReceiveBuffer {
+func newReceiveBuffer(size int, initSeqNum uint16) *ReceiveBuffer {
 	return &ReceiveBuffer{
 		buf:        make([]byte, size),
 		offset:     0,
@@ -35,7 +35,7 @@ func NewReceiveBuffer(size int, initSeqNum uint16) *ReceiveBuffer {
 	}
 }
 
-func NewReceiveBufferWithLogger(size int, initSeqNum uint16, logger log.Logger) *ReceiveBuffer {
+func newReceiveBufferWithLogger(size int, initSeqNum uint16, logger log.Logger) *ReceiveBuffer {
 	return &ReceiveBuffer{
 		logger:  logger,
 		buf:     make([]byte, size),
@@ -51,7 +51,7 @@ func (rb *ReceiveBuffer) Available() int {
 	available := len(rb.buf) - rb.offset
 
 	rb.pending.Ascend(func(i btree.Item) bool {
-		item := i.(*PendingItem)
+		item := i.(*pendingItem)
 		available -= len(item.data)
 		return true
 	})
@@ -67,9 +67,11 @@ func (rb *ReceiveBuffer) InitSeqNum() uint16 {
 }
 
 func (rb *ReceiveBuffer) WasWritten(seqNum uint16) bool {
-	exists := rb.pending.Has(&PendingItem{seqNum: seqNum})
-	rb.logger.Debug("checking written", "seqNum", seqNum, "initSeqNum", rb.initSeqNum, "consumed", rb.consumed, "exists", exists)
-	writtenRange := CircularRangeInclusive{start: rb.initSeqNum, end: rb.initSeqNum + rb.consumed}
+	exists := rb.pending.Has(&pendingItem{seqNum: seqNum})
+	if rb.logger != nil {
+		rb.logger.Debug("checking written", "seqNum", seqNum, "initSeqNum", rb.initSeqNum, "consumed", rb.consumed, "exists", exists)
+	}
+	writtenRange := circularRangeInclusive{start: rb.initSeqNum, end: rb.initSeqNum + rb.consumed}
 	return exists || writtenRange.Contains(seqNum)
 }
 
@@ -99,7 +101,7 @@ func (rb *ReceiveBuffer) Write(data []byte, seqNum uint16) error {
 		return errors.New("insufficient space in buffer")
 	}
 
-	rb.pending.ReplaceOrInsert(&PendingItem{seqNum: seqNum, data: data})
+	rb.pending.ReplaceOrInsert(&pendingItem{seqNum: seqNum, data: data})
 
 	//start := rb.initSeqNum + 1
 	next := rb.initSeqNum + 1 + rb.consumed
@@ -108,12 +110,12 @@ func (rb *ReceiveBuffer) Write(data []byte, seqNum uint16) error {
 	}
 
 	for {
-		item := rb.pending.Get(&PendingItem{seqNum: next})
+		item := rb.pending.Get(&pendingItem{seqNum: next})
 		if item == nil {
 			break
 		}
 
-		pending := item.(*PendingItem)
+		pending := item.(*pendingItem)
 
 		end := rb.offset + len(pending.data)
 		copy(rb.buf[rb.offset:end], pending.data)
@@ -144,7 +146,7 @@ func (rb *ReceiveBuffer) SelectiveAck() *SelectiveAck {
 	acked := make([]bool, 0)
 
 	rb.pending.Ascend(func(i btree.Item) bool {
-		item := i.(*PendingItem)
+		item := i.(*pendingItem)
 		for item.seqNum != next {
 			acked = append(acked, false)
 			next++

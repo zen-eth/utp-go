@@ -43,7 +43,7 @@ var (
 	ErrDuplicateTransmission  = errors.New("duplicate transmission")
 )
 
-type CtrlConfig struct {
+type ctrlConfig struct {
 	TargetDelayMicros     uint32
 	InitialTimeout        time.Duration
 	MinTimeout            time.Duration
@@ -55,8 +55,8 @@ type CtrlConfig struct {
 	WindowSize            uint32
 }
 
-func DefaultCtrlConfig() *CtrlConfig {
-	return &CtrlConfig{
+func defaultCtrlConfig() *ctrlConfig {
+	return &ctrlConfig{
 		TargetDelayMicros:     uint32(defaultTargetMicros.Microseconds()),
 		InitialTimeout:        defaultInitialTimeout,
 		MinTimeout:            defaultMinTimeout,
@@ -77,7 +77,7 @@ type Controller interface {
 	BytesAvailableInWindow() uint32
 }
 
-type DefaultController struct {
+type defaultController struct {
 	targetDelayMicros     uint32
 	timeout               time.Duration
 	minTimeout            time.Duration
@@ -90,12 +90,12 @@ type DefaultController struct {
 	rtt                   time.Duration
 	rttVarianceMicros     int64
 	transmissions         map[uint16]*packet
-	delayAcc              *DelayAccumulator
+	delayAcc              *delayAccumulator
 	mu                    sync.Mutex
 }
 
-func NewDefaultController(config *CtrlConfig) *DefaultController {
-	return &DefaultController{
+func newDefaultController(config *ctrlConfig) *defaultController {
+	return &defaultController{
 		targetDelayMicros:     config.TargetDelayMicros,
 		timeout:               config.InitialTimeout,
 		minTimeout:            config.MinTimeout,
@@ -108,17 +108,17 @@ func NewDefaultController(config *CtrlConfig) *DefaultController {
 		rtt:                   0,
 		rttVarianceMicros:     0,
 		transmissions:         make(map[uint16]*packet),
-		delayAcc:              NewDelayAccumulator(config.DelayWindow),
+		delayAcc:              newDelayAccumulator(config.DelayWindow),
 	}
 }
 
-func (c *DefaultController) Timeout() time.Duration {
+func (c *defaultController) Timeout() time.Duration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.timeout
 }
 
-func (c *DefaultController) BytesAvailableInWindow() uint32 {
+func (c *defaultController) BytesAvailableInWindow() uint32 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.maxWindowSizeBytes > c.windowSizeBytes {
@@ -127,7 +127,7 @@ func (c *DefaultController) BytesAvailableInWindow() uint32 {
 	return 0
 }
 
-func (c *DefaultController) OnTransmit(seqNum uint16, transmission Transmit, dataLen uint32) error {
+func (c *defaultController) OnTransmit(seqNum uint16, transmission Transmit, dataLen uint32) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -160,7 +160,7 @@ func (c *DefaultController) OnTransmit(seqNum uint16, transmission Transmit, dat
 	return nil
 }
 
-func (c *DefaultController) OnAck(seqNum uint16, ack Ack) error {
+func (c *defaultController) OnAck(seqNum uint16, ack Ack) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	packetInst, exists := c.transmissions[seqNum]
@@ -209,7 +209,7 @@ func (c *DefaultController) OnAck(seqNum uint16, ack Ack) error {
 	return nil
 }
 
-func (c *DefaultController) OnLostPacket(seqNum uint16, retransmitting bool) error {
+func (c *defaultController) OnLostPacket(seqNum uint16, retransmitting bool) error {
 	packetInst, exists := c.transmissions[seqNum]
 	if !exists {
 		return ErrUnknownSeqNum
@@ -224,14 +224,14 @@ func (c *DefaultController) OnLostPacket(seqNum uint16, retransmitting bool) err
 	return nil
 }
 
-func (c *DefaultController) OnTimeout() error {
+func (c *defaultController) OnTimeout() error {
 	c.maxWindowSizeBytes = c.minWindowSizeBytes
 	c.timeout = time.Duration(math.Min(float64(c.timeout*2), float64(c.maxTimeout)))
 	return nil
 }
 
 // applyMaxWindowSizeAdjustment adjusts the maximum window size based on the given adjustment.
-func (c *DefaultController) applyMaxWindowSizeAdjustment(adjustment int64) {
+func (c *defaultController) applyMaxWindowSizeAdjustment(adjustment int64) {
 	// Apply the adjustment.
 	adjMaxWindowSizeBytes := int64(c.maxWindowSizeBytes) + adjustment
 
@@ -247,7 +247,7 @@ func (c *DefaultController) applyMaxWindowSizeAdjustment(adjustment int64) {
 	))
 }
 
-func (c *DefaultController) applyTimeoutAdjustment() {
+func (c *defaultController) applyTimeoutAdjustment() {
 	c.timeout = time.Duration(math.Max(float64(c.rtt+time.Duration(c.rttVarianceMicros*4)), float64(c.minTimeout)))
 	c.timeout = time.Duration(math.Min(float64(c.timeout), float64(c.maxTimeout)))
 }
@@ -291,32 +291,32 @@ func computeRTTVarianceAdjustment(rttMicros, rttVarianceMicros, packetRTTMicros 
 
 // Additional methods for handling acknowledgments, lost packets, and timeouts would follow...
 
-type Delay struct {
+type delay struct {
 	Value    time.Duration
 	Deadline time.Time
 }
 
-type DelayAccumulator struct {
-	delays *DelayHeap
+type delayAccumulator struct {
+	delays *delayHeap
 	window time.Duration
 	mu     sync.Mutex
 }
 
-func NewDelayAccumulator(window time.Duration) *DelayAccumulator {
-	return &DelayAccumulator{
-		delays: &DelayHeap{},
+func newDelayAccumulator(window time.Duration) *delayAccumulator {
+	return &delayAccumulator{
+		delays: &delayHeap{},
 		window: window,
 	}
 }
 
-func (da *DelayAccumulator) Push(delay time.Duration, receivedAt time.Time) {
-	heap.Push(da.delays, Delay{
-		Value:    delay,
+func (da *delayAccumulator) Push(delayTime time.Duration, receivedAt time.Time) {
+	heap.Push(da.delays, delay{
+		Value:    delayTime,
 		Deadline: receivedAt.Add(da.window),
 	})
 }
 
-func (da *DelayAccumulator) BaseDelay() time.Duration {
+func (da *delayAccumulator) BaseDelay() time.Duration {
 	now := time.Now()
 	for da.delays.Len() > 0 {
 		min := (*da.delays)[0]
@@ -329,17 +329,17 @@ func (da *DelayAccumulator) BaseDelay() time.Duration {
 	return time.Duration(0)
 }
 
-type DelayHeap []Delay
+type delayHeap []delay
 
-func (h DelayHeap) Len() int           { return len(h) }
-func (h DelayHeap) Less(i, j int) bool { return h[i].Value < h[j].Value }
-func (h DelayHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h delayHeap) Len() int           { return len(h) }
+func (h delayHeap) Less(i, j int) bool { return h[i].Value < h[j].Value }
+func (h delayHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 
-func (h *DelayHeap) Push(x interface{}) {
-	*h = append(*h, x.(Delay))
+func (h *delayHeap) Push(x interface{}) {
+	*h = append(*h, x.(delay))
 }
 
-func (h *DelayHeap) Pop() interface{} {
+func (h *delayHeap) Pop() interface{} {
 	old := *h
 	n := len(old) - 1
 	x := old[n]

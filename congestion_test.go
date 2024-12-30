@@ -8,7 +8,7 @@ import (
 )
 
 func TestOnTransmit(t *testing.T) {
-	ctrl := NewDefaultController(DefaultCtrlConfig())
+	ctrl := newDefaultController(defaultCtrlConfig())
 	initialTimeout := ctrl.Timeout()
 
 	// Register the initial transmission of a packet with sequence number 1
@@ -65,7 +65,7 @@ func TestOnTransmit(t *testing.T) {
 }
 
 func TestOnTransmitDuplicateTransmission(t *testing.T) {
-	ctrl := NewDefaultController(DefaultCtrlConfig())
+	ctrl := newDefaultController(defaultCtrlConfig())
 
 	// Register the initial transmission of a packet with sequence number 1
 	seqNum := uint16(1)
@@ -84,7 +84,7 @@ func TestOnTransmitDuplicateTransmission(t *testing.T) {
 }
 
 func TestOnTransmitUnknownSeqNum(t *testing.T) {
-	ctrl := NewDefaultController(DefaultCtrlConfig())
+	ctrl := newDefaultController(defaultCtrlConfig())
 
 	// Register the retransmission of the packet with sequence number 1
 	seqNum := uint16(1)
@@ -94,7 +94,7 @@ func TestOnTransmitUnknownSeqNum(t *testing.T) {
 }
 
 func TestOnTransmitInsufficientWindowSize(t *testing.T) {
-	ctrl := NewDefaultController(DefaultCtrlConfig())
+	ctrl := newDefaultController(defaultCtrlConfig())
 
 	// Register the transmission of a packet with sequence number 1
 	seqNum := uint16(1)
@@ -109,7 +109,7 @@ func TestOnTransmitInsufficientWindowSize(t *testing.T) {
 }
 
 func TestOnAck(t *testing.T) {
-	ctrl := NewDefaultController(DefaultCtrlConfig())
+	ctrl := newDefaultController(defaultCtrlConfig())
 
 	// Register the initial transmission
 	seqNum := uint16(1)
@@ -142,7 +142,7 @@ func TestOnAck(t *testing.T) {
 }
 
 func TestOnAckUnknownSeqNum(t *testing.T) {
-	ctrl := NewDefaultController(DefaultCtrlConfig())
+	ctrl := newDefaultController(defaultCtrlConfig())
 
 	// Register the acknowledgement for packet with sequence number 1
 	seqNum := uint16(1)
@@ -157,7 +157,7 @@ func TestOnAckUnknownSeqNum(t *testing.T) {
 }
 
 func TestOnLostPacketRetransmitting(t *testing.T) {
-	ctrl := NewDefaultController(DefaultCtrlConfig())
+	ctrl := newDefaultController(defaultCtrlConfig())
 
 	initialMaxWindowSizeBytes := ctrl.minWindowSizeBytes * 10
 	ctrl.maxWindowSizeBytes = initialMaxWindowSizeBytes
@@ -187,7 +187,7 @@ func TestOnLostPacketRetransmitting(t *testing.T) {
 }
 
 func TestOnLostPacketUnknownSeqNum(t *testing.T) {
-	ctrl := NewDefaultController(DefaultCtrlConfig())
+	ctrl := newDefaultController(defaultCtrlConfig())
 
 	// Set initial max window size
 	initialMaxWindowSizeBytes := ctrl.minWindowSizeBytes * 10
@@ -206,7 +206,7 @@ func TestOnLostPacketUnknownSeqNum(t *testing.T) {
 }
 
 func TestOnTimeout(t *testing.T) {
-	ctrl := NewDefaultController(DefaultCtrlConfig())
+	ctrl := newDefaultController(defaultCtrlConfig())
 
 	// Set initial max window size
 	initialMaxWindowSizeBytes := ctrl.minWindowSizeBytes * 10
@@ -230,11 +230,11 @@ func TestOnTimeout(t *testing.T) {
 }
 
 func TestOnTimeoutNotExceedMax(t *testing.T) {
-	config := DefaultCtrlConfig()
+	config := defaultCtrlConfig()
 	config.InitialTimeout = 2 * time.Second
 	config.MaxTimeout = 3 * time.Second
 
-	ctrl := NewDefaultController(config)
+	ctrl := newDefaultController(config)
 
 	// Register timeout
 	err := ctrl.OnTimeout()
@@ -247,7 +247,7 @@ func TestOnTimeoutNotExceedMax(t *testing.T) {
 
 func TestPush(t *testing.T) {
 	window := 100 * time.Millisecond
-	acc := NewDelayAccumulator(window)
+	acc := newDelayAccumulator(window)
 
 	delay := 50 * time.Millisecond
 	delayReceivedAt := time.Now()
@@ -265,7 +265,7 @@ func TestPush(t *testing.T) {
 
 func TestBaseDelay(t *testing.T) {
 	window := 100 * time.Millisecond
-	acc := NewDelayAccumulator(window)
+	acc := newDelayAccumulator(window)
 
 	// Push delays in descending order
 	delaySmall := 50 * time.Millisecond
@@ -296,7 +296,7 @@ func TestBaseDelay(t *testing.T) {
 
 func TestBaseDelayEmpty(t *testing.T) {
 	window := time.Millisecond * 100
-	acc := NewDelayAccumulator(window)
+	acc := newDelayAccumulator(window)
 	baseDelay := acc.BaseDelay()
 	require.Equal(t, time.Duration(0), baseDelay, "expected base delay 0, got %v", baseDelay)
 }

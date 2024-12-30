@@ -3,25 +3,25 @@ package utp_go
 type StreamEventType int
 
 const (
-	StreamIncoming StreamEventType = iota
-	StreamShutdown
+	streamIncoming StreamEventType = iota
+	streamShutdown
 )
 
-type SocketEventType int
+type socketEventType int
 
 const (
-	Outgoing SocketEventType = iota
-	SocketShutdown
+	outgoing socketEventType = iota
+	socketShutdown
 )
 
-type StreamEvent struct {
+type streamEvent struct {
 	Type   StreamEventType
 	Packet *Packet
 }
 
-// SocketEvent represents events related to a socket.
-type SocketEvent struct {
-	Type         SocketEventType
+// socketEvent represents events related to a socket.
+type socketEvent struct {
+	Type         socketEventType
 	Packet       *Packet
 	ConnectionId ConnectionPeer
 }

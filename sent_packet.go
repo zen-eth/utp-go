@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/google/btree"
 )
 
 const LOSS_THRESHOLD = 3
@@ -56,7 +57,7 @@ func (l LostPacketSeqNums) Remove(seq uint16) LostPacketSeqNums {
 type SentPackets struct {
 	packets        []*SentPacket
 	initSeqNum     uint16
-	lostPackets    LostPacketSeqNums
+	lostPackets    *btree.BTreeG[uint16]
 	congestionCtrl Controller
 }
 
@@ -64,7 +65,7 @@ func NewSentPackets(initSeqNum uint16, congestionCtrl Controller) *SentPackets {
 	return &SentPackets{
 		packets:        make([]*SentPacket, 0),
 		initSeqNum:     initSeqNum,
-		lostPackets:    make([]uint16, 0),
+		lostPackets:    btree.NewOrderedG[uint16](2),
 		congestionCtrl: congestionCtrl,
 	}
 }
@@ -85,9 +86,9 @@ func (s *SentPackets) AckNum() uint16 {
 	return num
 }
 
-func (s *SentPackets) SeqNumRange() *CircularRangeInclusive {
+func (s *SentPackets) SeqNumRange() *circularRangeInclusive {
 	end := s.NextSeqNum() - uint16(1)
-	return NewCircularRangeInclusive(s.initSeqNum, end)
+	return newCircularRangeInclusive(s.initSeqNum, end)
 }
 
 func (s *SentPackets) Timeout() time.Duration {
@@ -104,17 +105,15 @@ func (s *SentPackets) HasUnackedPackets() bool {
 }
 
 func (s *SentPackets) HasLostPackets() bool {
-	return len(s.lostPackets) != 0
+	return s.lostPackets.Len() != 0
 }
 
 func (s *SentPackets) LostPackets() []*LostPacket {
 	var result []*LostPacket
 
-	for _, seq := range s.lostPackets {
-		index := s.SeqNumIndex(seq)
+	s.lostPackets.Ascend(func(seqNum uint16) bool {
+		index := s.SeqNumIndex(seqNum)
 		sentPacket := s.packets[index] // We can directly access since we know lost packets must exist
-
-		// Create a tuple-like array with the three values
 		lostPacket := &LostPacket{
 			sentPacket.seqNum,     // uint16
 			sentPacket.packetType, // PacketType
@@ -122,7 +121,8 @@ func (s *SentPackets) LostPackets() []*LostPacket {
 		}
 
 		result = append(result, lostPacket)
-	}
+		return true
+	})
 
 	return result
 }
@@ -180,12 +180,12 @@ func (s *SentPackets) OnAck(
 	selectiveAck *SelectiveAck,
 	delay time.Duration,
 	now time.Time,
-) (*CircularRangeInclusive, []uint16, error) {
+) (*circularRangeInclusive, []uint16, error) {
 	// Check if ack number is in valid range
 	seqRange := s.SeqNumRange()
 	if !seqRange.Contains(ackNum) {
 		if len(s.packets) != 0 && seqRange.end == seqRange.start {
-			seqRange = NewCircularRangeInclusive(seqRange.start, seqRange.end-1)
+			seqRange = newCircularRangeInclusive(seqRange.start, seqRange.end-1)
 			if !seqRange.Contains(ackNum) {
 				return nil, nil, ErrInvalidAckNum
 			}
@@ -202,7 +202,7 @@ func (s *SentPackets) OnAck(
 	}
 
 	// Mark all packets up to ackNum as acknowledged
-	fullAcked := NewCircularRangeInclusive(seqRange.Start(), ackNum)
+	fullAcked := newCircularRangeInclusive(seqRange.Start(), ackNum)
 
 	if selectiveAck != nil {
 		selectedAcks := make([]uint16, 0)
@@ -242,9 +242,9 @@ func (s *SentPackets) OnAckNum(
 	}
 
 	// Account for (newly) lost packets
-	lostPackets := s.DetectLostPackets()
-	for _, packetInst := range lostPackets {
-		s.lostPackets = append(s.lostPackets, packetInst)
+	losts := s.DetectLostPackets()
+	for _, packetInst := range losts {
+		s.lostPackets.ReplaceOrInsert(packetInst)
 		_ = s.OnLost(packetInst, true)
 	}
 	return nil
@@ -326,7 +326,7 @@ func (s *SentPackets) Ack(seqNum uint16, delay time.Duration, now time.Time) err
 
 	packetInst.acks = append(packetInst.acks, now)
 
-	s.lostPackets = s.lostPackets.Remove(packetInst.seqNum)
+	s.lostPackets.Delete(packetInst.seqNum)
 	return nil
 }
 

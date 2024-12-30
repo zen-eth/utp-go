@@ -19,11 +19,11 @@ const (
 )
 
 const (
-	ST_DATA PacketType = iota
-	ST_FIN
-	ST_STATE
-	ST_RESET
-	ST_SYN
+	st_data PacketType = iota
+	st_fin
+	st_state
+	st_reset
+	st_syn
 )
 
 var (
@@ -48,16 +48,16 @@ func (p PacketType) Check() error {
 
 func (p *PacketType) String() string {
 	switch *p {
-	case ST_DATA:
-		return "ST_DATA"
-	case ST_FIN:
-		return "ST_FIN"
-	case ST_STATE:
-		return "ST_STATE"
-	case ST_RESET:
-		return "ST_RESET"
-	case ST_SYN:
-		return "ST_SYN"
+	case st_data:
+		return "st_data"
+	case st_fin:
+		return "st_fin"
+	case st_state:
+		return "st_state"
+	case st_reset:
+		return "st_reset"
+	case st_syn:
+		return "st_syn"
 	default:
 		return "UNKNOWN"
 	}
@@ -283,7 +283,7 @@ func DecodePacket(b []byte) (*Packet, error) {
 	} else {
 		payload = b[payloadStartIndex:]
 	}
-	if header.PacketType == ST_DATA && len(payload) == 0 {
+	if header.PacketType == st_data && len(payload) == 0 {
 		return nil, ErrEmptyDataPayload
 	}
 	p.Header = header

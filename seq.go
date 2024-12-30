@@ -1,15 +1,15 @@
 package utp_go
 
-// CircularRangeInclusive represents a range bounded inclusively below and above that supports wrapping arithmetic.
-type CircularRangeInclusive struct {
+// circularRangeInclusive represents a range bounded inclusively below and above that supports wrapping arithmetic.
+type circularRangeInclusive struct {
 	start     uint16
 	end       uint16
 	exhausted bool
 }
 
-// NewCircularRangeInclusive returns a new CircularRangeInclusive.
-func NewCircularRangeInclusive(start, end uint16) *CircularRangeInclusive {
-	return &CircularRangeInclusive{
+// newCircularRangeInclusive returns a new circularRangeInclusive.
+func newCircularRangeInclusive(start, end uint16) *circularRangeInclusive {
+	return &circularRangeInclusive{
 		start:     start,
 		end:       end,
 		exhausted: false,
@@ -17,17 +17,17 @@ func NewCircularRangeInclusive(start, end uint16) *CircularRangeInclusive {
 }
 
 // Start returns the start of the range (inclusive).
-func (r *CircularRangeInclusive) Start() uint16 {
+func (r *circularRangeInclusive) Start() uint16 {
 	return r.start
 }
 
 // End returns the end of the range (inclusive).
-func (r *CircularRangeInclusive) End() uint16 {
+func (r *circularRangeInclusive) End() uint16 {
 	return r.end
 }
 
 // Contains returns true if item is contained in the range.
-func (r *CircularRangeInclusive) Contains(item uint16) bool {
+func (r *circularRangeInclusive) Contains(item uint16) bool {
 	if r.end >= r.start {
 		return item >= r.start && item <= r.end
 	} else if item >= r.start {
@@ -38,7 +38,7 @@ func (r *CircularRangeInclusive) Contains(item uint16) bool {
 }
 
 // Next returns the next item in the range, or nil if the range is exhausted.
-func (r *CircularRangeInclusive) Next() (uint16, bool) {
+func (r *circularRangeInclusive) Next() (uint16, bool) {
 	if r.exhausted {
 		return 0, false
 	} else if r.start == r.end {

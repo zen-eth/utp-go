@@ -85,7 +85,7 @@ func (mr *MockControllerMockRecorder) OnLostPacket(seqNum, retransmitting any) *
 // OnTimeout mocks base method.
 func (m *MockController) OnTimeout() error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "OnTimeout")
+	ret := m.ctrl.Call(m, "onTimeout")
 	ret0, _ := ret[0].(error)
 	return ret0
 }
@@ -93,7 +93,7 @@ func (m *MockController) OnTimeout() error {
 // OnTimeout indicates an expected call of OnTimeout.
 func (mr *MockControllerMockRecorder) OnTimeout() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnTimeout", reflect.TypeOf((*MockController)(nil).OnTimeout))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "onTimeout", reflect.TypeOf((*MockController)(nil).OnTimeout))
 }
 
 // OnTransmit mocks base method.
