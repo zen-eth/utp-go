@@ -209,13 +209,13 @@ func DecodeSelectiveAck(data []byte) (*SelectiveAck, error) {
 
 type SelectiveAckExtension [4]byte
 
-type Packet struct {
+type packet struct {
 	Header *PacketHeaderV1
 	Eack   *SelectiveAck
 	Body   []byte
 }
 
-func (p *Packet) EncodedLen() int {
+func (p *packet) EncodedLen() int {
 	length := MINIMAL_HEADER_SIZE
 
 	if p.Eack != nil {
@@ -227,7 +227,7 @@ func (p *Packet) EncodedLen() int {
 	return length
 }
 
-func (p *Packet) Encode() []byte {
+func (p *packet) Encode() []byte {
 	bytes := make([]byte, 0)
 
 	// Encode header
@@ -246,8 +246,8 @@ func (p *Packet) Encode() []byte {
 	return bytes
 }
 
-func DecodePacket(b []byte) (*Packet, error) {
-	var p Packet
+func DecodePacket(b []byte) (*packet, error) {
+	var p packet
 	receivedBytesLength := len(b)
 	if receivedBytesLength < MINIMAL_HEADER_SIZE {
 		return nil, ErrInvalidHeaderSize
@@ -436,7 +436,7 @@ func (b *PacketBuilder) WithPayload(payload []byte) *PacketBuilder {
 	return b
 }
 
-func (b *PacketBuilder) Build() *Packet {
+func (b *PacketBuilder) Build() *packet {
 	var headerExtension byte
 	if b.selectiveAck != nil {
 		headerExtension = 1
@@ -447,7 +447,7 @@ func (b *PacketBuilder) Build() *Packet {
 		payload = b.payload
 	}
 
-	return &Packet{
+	return &packet{
 		Header: &PacketHeaderV1{
 			PacketType:    b.packetType,
 			Version:       PROTOCOL_VERSION_ONE,

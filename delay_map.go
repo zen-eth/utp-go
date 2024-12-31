@@ -8,8 +8,8 @@ import (
 )
 
 type delayMap[P any] struct {
-	unackedMu     sync.Mutex
-	unacked       map[any]*delayItem[P]
+	lock          sync.Mutex
+	innerMap      map[any]*delayItem[P]
 	itemTimeoutCh chan *delayItem[P]
 	shouldLock    bool
 }
@@ -22,7 +22,7 @@ type delayItem[P any] struct {
 
 func newDelayMap[P any]() *delayMap[P] {
 	return &delayMap[P]{
-		unacked:       make(map[any]*delayItem[P]),
+		innerMap:      make(map[any]*delayItem[P]),
 		itemTimeoutCh: make(chan *delayItem[P], 100),
 		shouldLock:    false,
 	}
@@ -32,10 +32,10 @@ func (m *delayMap[P]) timeoutCh() chan *delayItem[P] {
 	return m.itemTimeoutCh
 }
 
-func (m *delayMap[P]) Put(key any, value P, timeout time.Duration) {
+func (m *delayMap[P]) put(key any, value P, timeout time.Duration) {
 	if m.shouldLock {
-		m.unackedMu.Lock()
-		defer m.unackedMu.Unlock()
+		m.lock.Lock()
+		defer m.lock.Unlock()
 	}
 
 	item := &delayItem[P]{
@@ -46,49 +46,53 @@ func (m *delayMap[P]) Put(key any, value P, timeout time.Duration) {
 		m.itemTimeoutCh <- item
 	})
 	item.timer = timer
-	m.unacked[key] = item
+	m.innerMap[key] = item
 }
 
-func (m *delayMap[P]) Get(key any) P {
+func (m *delayMap[P]) get(key any) P {
 	if m.shouldLock {
-		m.unackedMu.Lock()
-		defer m.unackedMu.Unlock()
+		m.lock.Lock()
+		defer m.lock.Unlock()
 	}
-	return m.unacked[key].Item
+	return m.innerMap[key].Item
 }
 
-func (m *delayMap[P]) Retain(shouldRemove func(key any) bool) {
+func (m *delayMap[P]) retain(shouldRemove func(key any) bool) {
 	if m.shouldLock {
-		m.unackedMu.Lock()
-		defer m.unackedMu.Unlock()
+		m.lock.Lock()
+		defer m.lock.Unlock()
 	}
-	for k := range m.unacked {
+	for k := range m.innerMap {
 		if shouldRemove(k) {
-			m.Remove(k)
+			m.remove(k)
 		}
 	}
 }
 
-func (m *delayMap[P]) Remove(key any) {
+func (m *delayMap[P]) remove(key any) {
 	if m.shouldLock {
-		m.unackedMu.Lock()
-		defer m.unackedMu.Unlock()
+		m.lock.Lock()
+		defer m.lock.Unlock()
 	}
-	log.Debug("delay map key count before", "count", len(m.unacked))
-	if item, ok := m.unacked[key]; ok {
+	if log.Root().Enabled(BASE_CONTEXT, log.LevelDebug) {
+		log.Debug("delay map key count before", "count", len(m.innerMap))
+	}
+	if item, ok := m.innerMap[key]; ok {
 		item.timer.Stop()
 	}
-	delete(m.unacked, key)
-	log.Debug("delay map key count after", "count", len(m.unacked))
+	delete(m.innerMap, key)
+	if log.Root().Enabled(BASE_CONTEXT, log.LevelDebug) {
+		log.Debug("delay map key count after", "count", len(m.innerMap))
+	}
 }
 
-func (m *delayMap[P]) Keys() []any {
+func (m *delayMap[P]) keys() []any {
 	if m.shouldLock {
-		m.unackedMu.Lock()
-		defer m.unackedMu.Unlock()
+		m.lock.Lock()
+		defer m.lock.Unlock()
 	}
 	var keys []any
-	for k := range m.unacked {
+	for k := range m.innerMap {
 		keys = append(keys, k)
 	}
 	return keys

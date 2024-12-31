@@ -25,7 +25,7 @@ const (
 
 type Transmit int
 
-type packet struct {
+type packetRecord struct {
 	SizeBytes        uint32
 	NumTransmissions uint32
 	Acked            bool
@@ -89,7 +89,7 @@ type defaultController struct {
 	gain                  float32
 	rtt                   time.Duration
 	rttVarianceMicros     int64
-	transmissions         map[uint16]*packet
+	transmissions         map[uint16]*packetRecord
 	delayAcc              *delayAccumulator
 	mu                    sync.Mutex
 }
@@ -107,7 +107,7 @@ func newDefaultController(config *ctrlConfig) *defaultController {
 		gain:                  config.Gain,
 		rtt:                   0,
 		rttVarianceMicros:     0,
-		transmissions:         make(map[uint16]*packet),
+		transmissions:         make(map[uint16]*packetRecord),
 		delayAcc:              newDelayAccumulator(config.DelayWindow),
 	}
 }
@@ -131,12 +131,12 @@ func (c *defaultController) OnTransmit(seqNum uint16, transmission Transmit, dat
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	var packetInst *packet
+	var packetInst *packetRecord
 	if transmission == Initial {
 		if _, exists := c.transmissions[seqNum]; exists {
 			return ErrDuplicateTransmission
 		}
-		packetInst = &packet{
+		packetInst = &packetRecord{
 			SizeBytes:        dataLen,
 			NumTransmissions: 1,
 			Acked:            false,

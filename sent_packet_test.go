@@ -19,7 +19,7 @@ func TestOnTransmitInitial(t *testing.T) {
 	ctrl := newDefaultController(fromConnConfig(NewConnectionConfig()))
 
 	initSeqNum := uint16(math.MaxUint16)
-	sentPackets := NewSentPackets(initSeqNum, ctrl)
+	sentPackets := newSentPacketsWithoutLogger(initSeqNum, ctrl)
 
 	seqNum := sentPackets.NextSeqNum()
 	data := []byte{0}
@@ -49,7 +49,7 @@ func TestOnTransmitInitial(t *testing.T) {
 func TestOnTransmitRetransmit(t *testing.T) {
 	initSeqNum := uint16(math.MaxUint16)
 	ctrl := newDefaultController(fromConnConfig(NewConnectionConfig()))
-	sentPackets := NewSentPackets(initSeqNum, ctrl)
+	sentPackets := newSentPacketsWithoutLogger(initSeqNum, ctrl)
 
 	seqNum := sentPackets.NextSeqNum()
 	data := []byte{0}
@@ -86,7 +86,7 @@ func TestOnTransmitOutOfOrder(t *testing.T) {
 	initSeqNum := uint16(math.MaxUint16)
 
 	ctrl := newDefaultController(fromConnConfig(NewConnectionConfig()))
-	sentPackets := NewSentPackets(initSeqNum, ctrl)
+	sentPackets := newSentPacketsWithoutLogger(initSeqNum, ctrl)
 
 	outOfOrderSeqNum := initSeqNum + 2 // wrapping addition for uint16
 	data := []byte{0}
@@ -113,7 +113,7 @@ func TestOnSelectiveAck(t *testing.T) {
 	ctrl := newDefaultController(fromConnConfig(NewConnectionConfig()))
 
 	initSeqNum := uint16(math.MaxUint16)
-	sentPackets := NewSentPackets(initSeqNum, ctrl)
+	sentPackets := newSentPacketsWithoutLogger(initSeqNum, ctrl)
 
 	data := []byte{0}
 	length := uint32(len(data))
@@ -136,7 +136,7 @@ func TestOnSelectiveAck(t *testing.T) {
 
 	// Process ACK
 	now := time.Now()
-	_, _, err := sentPackets.OnAck(initSeqNum+1, selectiveAck, DELAY, now)
+	_, _, err := sentPackets.onAck(initSeqNum+1, selectiveAck, DELAY, now)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestDetectLostPackets(t *testing.T) {
 	ctrl := newDefaultController(fromConnConfig(NewConnectionConfig()))
 
 	initSeqNum := uint16(math.MaxUint16)
-	sentPackets := NewSentPackets(initSeqNum, ctrl)
+	sentPackets := newSentPacketsWithoutLogger(initSeqNum, ctrl)
 
 	data := []byte{0}
 	length := uint32(len(data))
@@ -182,7 +182,9 @@ func TestDetectLostPackets(t *testing.T) {
 	}
 
 	// Detect lost packets
-	lost := sentPackets.DetectLostPackets()
+	firstUnacked, err := sentPackets.FirstUnackedSeqNum()
+	require.NoError(t, err)
+	lost := sentPackets.DetectLostPackets(firstUnacked)
 
 	// Verify lost packets
 	for i := 0; i < START; i++ {
@@ -203,7 +205,7 @@ func TestAck(t *testing.T) {
 	ctrl := newDefaultController(fromConnConfig(NewConnectionConfig()))
 
 	initSeqNum := uint16(math.MaxUint16)
-	sentPackets := NewSentPackets(initSeqNum, ctrl)
+	sentPackets := newSentPacketsWithoutLogger(initSeqNum, ctrl)
 
 	seqNum := sentPackets.NextSeqNum()
 	data := []byte{0}
@@ -248,7 +250,7 @@ func TestAckPriorUnacked(t *testing.T) {
 	ctrl := newDefaultController(fromConnConfig(NewConnectionConfig()))
 
 	initSeqNum := uint16(math.MaxUint16)
-	sentPackets := NewSentPackets(initSeqNum, ctrl)
+	sentPackets := newSentPacketsWithoutLogger(initSeqNum, ctrl)
 
 	data := []byte{0}
 	length := uint32(len(data))
@@ -268,9 +270,11 @@ func TestAckPriorUnacked(t *testing.T) {
 		t.Fatal("COUNT minus ACK_NUM must be greater than 2")
 	}
 
-	// Acknowledge prior unacked packets
+	// Acknowledge prior innerMap packets
 	now := time.Now()
-	err := sentPackets.AckPriorUnacked(ACK_NUM, DELAY, now)
+	firstUnacked, err := sentPackets.FirstUnackedSeqNum()
+	require.NoError(t, err)
+	err = sentPackets.AckPriorUnacked(ACK_NUM, firstUnacked, DELAY, now)
 	require.NoError(t, err)
 
 	// Verify acknowledgments
@@ -287,7 +291,7 @@ func TestAckUnsent(t *testing.T) {
 	ctrl := newDefaultController(fromConnConfig(NewConnectionConfig()))
 
 	initSeqNum := uint16(math.MaxUint16)
-	sentPackets := NewSentPackets(initSeqNum, ctrl)
+	sentPackets := newSentPacketsWithoutLogger(initSeqNum, ctrl)
 
 	unsentAckNum := initSeqNum + 2 // wrapping addition for uint16
 	now := time.Now()
@@ -307,7 +311,7 @@ func TestSeqNumIndex(t *testing.T) {
 	ctrl := newDefaultController(fromConnConfig(NewConnectionConfig()))
 
 	initSeqNum := uint16(math.MaxUint16)
-	sentPackets := NewSentPackets(initSeqNum, ctrl)
+	sentPackets := newSentPacketsWithoutLogger(initSeqNum, ctrl)
 
 	if sentPackets.SeqNumIndex(initSeqNum) != math.MaxUint16 {
 		t.Errorf("expected index %d, got %d", math.MaxUint16, sentPackets.SeqNumIndex(initSeqNum))

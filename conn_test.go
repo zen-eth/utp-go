@@ -43,7 +43,7 @@ func CreateTestConnection(endpoint Endpoint) *connection {
 		peerTsDiff:     100 * time.Millisecond,
 		peerRecvWindow: math.MaxUint32,
 		socketEvents:   socketEvents,
-		unacked:        newDelayMap[*Packet](),
+		unacked:        newDelayMap[*packet](),
 		reads:          reads,
 		readable:       make(chan struct{}, 1),
 		pendingWrites:  make([]*queuedWrite, 0),
@@ -136,7 +136,7 @@ func TestOnPacketInvalidAckNum(t *testing.T) {
 
 	// Setup congestion control
 	congestionCtrl := newDefaultController(fromConnConfig(conn.config))
-	sentPackets := NewSentPackets(synAck, congestionCtrl)
+	sentPackets := newSentPacketsWithoutLogger(synAck, congestionCtrl)
 
 	// Send a packet
 	data := []byte{0xef}
@@ -186,7 +186,7 @@ func TestOnFinEstablished(t *testing.T) {
 	// Create buffers and controllers
 	sendBuf := newSendBuffer(TEST_BUFFER_SIZE)
 	congestionCtrl := newDefaultController(fromConnConfig(conn.config))
-	sentPackets := NewSentPackets(synAck, congestionCtrl)
+	sentPackets := newSentPacketsWithoutLogger(synAck, congestionCtrl)
 	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, syn)
 
 	// Set connected state
@@ -225,7 +225,7 @@ func TestOnFinClosing(t *testing.T) {
 	// Step 2: Setup buffers and controllers
 	sendBuf := newSendBuffer(TEST_BUFFER_SIZE)
 	congestionCtrl := newDefaultController(fromConnConfig(conn.config))
-	sentPackets := NewSentPackets(synAck, congestionCtrl)
+	sentPackets := newSentPacketsWithoutLogger(synAck, congestionCtrl)
 	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, syn)
 
 	// Step 3: Set local fin
@@ -272,7 +272,7 @@ func TestOnFinClosingNonMatchingFin(t *testing.T) {
 	// Step 2: Setup buffers
 	sendBuf := newSendBuffer(TEST_BUFFER_SIZE)
 	congestionCtrl := newDefaultController(fromConnConfig(conn.config))
-	sentPackets := NewSentPackets(synAck, congestionCtrl)
+	sentPackets := newSentPacketsWithoutLogger(synAck, congestionCtrl)
 	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, syn)
 
 	// Step 3: Set initial fin

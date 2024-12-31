@@ -22,7 +22,7 @@ type LostPacket struct {
 	Data       []byte
 }
 
-type SentPacket struct {
+type sentPacket struct {
 	seqNum          uint16
 	packetType      PacketType
 	data            []byte
@@ -31,7 +31,7 @@ type SentPacket struct {
 	acks            []time.Time
 }
 
-func (s *SentPacket) rtt(now time.Time) time.Duration {
+func (s *sentPacket) rtt(now time.Time) time.Duration {
 	var lastTransmission time.Time
 	if len(s.retransmissions) == 0 {
 		lastTransmission = s.transmission
@@ -54,31 +54,42 @@ func (l LostPacketSeqNums) Remove(seq uint16) LostPacketSeqNums {
 	return n
 }
 
-type SentPackets struct {
-	packets        []*SentPacket
+type sentPackets struct {
+	logger         log.Logger
+	packets        []*sentPacket
 	initSeqNum     uint16
 	lostPackets    *btree.BTreeG[uint16]
 	congestionCtrl Controller
 }
 
-func NewSentPackets(initSeqNum uint16, congestionCtrl Controller) *SentPackets {
-	return &SentPackets{
-		packets:        make([]*SentPacket, 0),
+func newSentPackets(initSeqNum uint16, congestionCtrl Controller, logger log.Logger) *sentPackets {
+	return &sentPackets{
+		logger:         logger,
+		packets:        make([]*sentPacket, 0),
 		initSeqNum:     initSeqNum,
 		lostPackets:    btree.NewOrderedG[uint16](2),
 		congestionCtrl: congestionCtrl,
 	}
 }
 
-func (s *SentPackets) OnTimeout() {
+func newSentPacketsWithoutLogger(initSeqNum uint16, congestionCtrl Controller) *sentPackets {
+	return &sentPackets{
+		packets:        make([]*sentPacket, 0),
+		initSeqNum:     initSeqNum,
+		lostPackets:    btree.NewOrderedG[uint16](2),
+		congestionCtrl: congestionCtrl,
+	}
+}
+
+func (s *sentPackets) OnTimeout() {
 	s.congestionCtrl.OnTimeout()
 }
 
-func (s *SentPackets) NextSeqNum() uint16 {
+func (s *sentPackets) NextSeqNum() uint16 {
 	return s.initSeqNum + uint16(len(s.packets)) + uint16(1)
 }
 
-func (s *SentPackets) AckNum() uint16 {
+func (s *sentPackets) AckNum() uint16 {
 	num, isNone := s.LastAckNum()
 	if isNone {
 		return 0
@@ -86,38 +97,38 @@ func (s *SentPackets) AckNum() uint16 {
 	return num
 }
 
-func (s *SentPackets) SeqNumRange() *circularRangeInclusive {
+func (s *sentPackets) SeqNumRange() *circularRangeInclusive {
 	end := s.NextSeqNum() - uint16(1)
 	return newCircularRangeInclusive(s.initSeqNum, end)
 }
 
-func (s *SentPackets) Timeout() time.Duration {
+func (s *sentPackets) Timeout() time.Duration {
 	return s.congestionCtrl.Timeout()
 }
 
-func (s *SentPackets) Window() uint32 {
+func (s *sentPackets) Window() uint32 {
 	return s.congestionCtrl.BytesAvailableInWindow()
 }
 
-func (s *SentPackets) HasUnackedPackets() bool {
+func (s *sentPackets) HasUnackedPackets() bool {
 	_, err := s.FirstUnackedSeqNum()
 	return err == nil
 }
 
-func (s *SentPackets) HasLostPackets() bool {
+func (s *sentPackets) HasLostPackets() bool {
 	return s.lostPackets.Len() != 0
 }
 
-func (s *SentPackets) LostPackets() []*LostPacket {
+func (s *sentPackets) LostPackets() []*LostPacket {
 	var result []*LostPacket
 
 	s.lostPackets.Ascend(func(seqNum uint16) bool {
 		index := s.SeqNumIndex(seqNum)
-		sentPacket := s.packets[index] // We can directly access since we know lost packets must exist
+		packetInst := s.packets[index] // We can directly access since we know lost packets must exist
 		lostPacket := &LostPacket{
-			sentPacket.seqNum,     // uint16
-			sentPacket.packetType, // PacketType
-			sentPacket.data,       // []byte or nil
+			packetInst.seqNum,     // uint16
+			packetInst.packetType, // PacketType
+			packetInst.data,       // []byte or nil
 		}
 
 		result = append(result, lostPacket)
@@ -127,7 +138,7 @@ func (s *SentPackets) LostPackets() []*LostPacket {
 	return result
 }
 
-func (s *SentPackets) OnTransmit(
+func (s *sentPackets) OnTransmit(
 	seqNum uint16,
 	packetType PacketType,
 	data []byte,
@@ -152,7 +163,7 @@ func (s *SentPackets) OnTransmit(
 		s.packets[index].retransmissions = append(s.packets[index].retransmissions, now)
 	} else {
 		// Create new packet
-		sent := &SentPacket{
+		sent := &sentPacket{
 			seqNum:          seqNum,
 			packetType:      packetType,
 			data:            data,
@@ -175,7 +186,7 @@ func (s *SentPackets) OnTransmit(
 	}
 }
 
-func (s *SentPackets) OnAck(
+func (s *sentPackets) onAck(
 	ackNum uint16,
 	selectiveAck *SelectiveAck,
 	delay time.Duration,
@@ -219,7 +230,7 @@ func (s *SentPackets) OnAck(
 	return fullAcked, nil, nil
 }
 
-func (s *SentPackets) OnAckNum(
+func (s *sentPackets) OnAckNum(
 	ackNum uint16,
 	selectiveAck *SelectiveAck,
 	delay time.Duration,
@@ -235,14 +246,19 @@ func (s *SentPackets) OnAckNum(
 		return err
 	}
 
+	firstUnacked, err := s.FirstUnackedSeqNum()
+	if err != nil {
+		return err
+	}
+
 	// An ACK for ackNum implicitly ACKs all sequence numbers that precede ackNum
-	// Account for any preceding unacked packets
-	if err = s.AckPriorUnacked(ackNum, delay, now); err != nil {
+	// Account for any preceding innerMap packets
+	if err = s.AckPriorUnacked(ackNum, firstUnacked, delay, now); err != nil {
 		return err
 	}
 
 	// Account for (newly) lost packets
-	losts := s.DetectLostPackets()
+	losts := s.DetectLostPackets(firstUnacked)
 	for _, packetInst := range losts {
 		s.lostPackets.ReplaceOrInsert(packetInst)
 		_ = s.OnLost(packetInst, true)
@@ -250,7 +266,7 @@ func (s *SentPackets) OnAckNum(
 	return nil
 }
 
-func (s *SentPackets) OnSelectiveAck(
+func (s *sentPackets) OnSelectiveAck(
 	ackNum uint16,
 	selectiveAck *SelectiveAck,
 	delay time.Duration,
@@ -284,14 +300,10 @@ func (s *SentPackets) OnSelectiveAck(
 	return nil
 }
 
-func (s *SentPackets) DetectLostPackets() []uint16 {
+func (s *sentPackets) DetectLostPackets(firstUnacked uint16) []uint16 {
 	var lost []uint16
 	acked := 0
 
-	firstUnacked, err := s.FirstUnackedSeqNum()
-	if err != nil {
-		return lost
-	}
 	startIndex := s.SeqNumIndex(firstUnacked)
 	packets := s.packets[startIndex:]
 
@@ -310,7 +322,7 @@ func (s *SentPackets) DetectLostPackets() []uint16 {
 	return lost
 }
 
-func (s *SentPackets) Ack(seqNum uint16, delay time.Duration, now time.Time) error {
+func (s *sentPackets) Ack(seqNum uint16, delay time.Duration, now time.Time) error {
 	index := s.SeqNumIndex(seqNum)
 	packetInst := s.packets[index]
 	ack := Ack{
@@ -322,36 +334,36 @@ func (s *SentPackets) Ack(seqNum uint16, delay time.Duration, now time.Time) err
 	if err := s.congestionCtrl.OnAck(packetInst.seqNum, ack); err != nil {
 		return err
 	}
-	log.Trace("record Acks", "seqNum", packetInst.seqNum, "acks.len", len(packetInst.acks)+1)
-
+	if s.logger != nil && s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+		log.Trace("record Acks", "seqNum", packetInst.seqNum, "acks.len", len(packetInst.acks)+1)
+	}
 	packetInst.acks = append(packetInst.acks, now)
 
 	s.lostPackets.Delete(packetInst.seqNum)
 	return nil
 }
 
-func (s *SentPackets) AckPriorUnacked(seqNum uint16, delay time.Duration, now time.Time) error {
-	firstUnacked, err := s.FirstUnackedSeqNum()
-	if err != nil {
-		return err
-	}
-
+func (s *sentPackets) AckPriorUnacked(seqNum uint16, firstUnacked uint16, delay time.Duration, now time.Time) error {
 	start := s.SeqNumIndex(firstUnacked)
 	end := s.SeqNumIndex(seqNum)
 	if start >= end {
 		return nil
 	}
-	log.Trace("AckPriorUnacked", "sentPackets.len", len(s.packets), "start", start, "end", end)
+	if s.logger != nil && s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+		s.logger.Trace("AckPriorUnacked", "sentPackets.len", len(s.packets), "start", start, "end", end)
+	}
 	for _, packetInst := range s.packets[start:end] {
-		log.Trace("record Ack", "seqNum", packetInst.seqNum)
-		if err = s.Ack(packetInst.seqNum, delay, now); err != nil {
+		if s.logger != nil && s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+			s.logger.Trace("record Ack", "seqNum", packetInst.seqNum)
+		}
+		if err := s.Ack(packetInst.seqNum, delay, now); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *SentPackets) LastAckNum() (uint16, bool) {
+func (s *sentPackets) LastAckNum() (uint16, bool) {
 	if len(s.packets) == 0 {
 		return 0, true
 	}
@@ -368,7 +380,7 @@ func (s *SentPackets) LastAckNum() (uint16, bool) {
 	return num, none
 }
 
-func (s *SentPackets) OnLost(seqNum uint16, retransmitting bool) error {
+func (s *sentPackets) OnLost(seqNum uint16, retransmitting bool) error {
 	if !s.SeqNumRange().Contains(seqNum) {
 		return ErrCannotFindLostPacket
 	}
@@ -380,7 +392,7 @@ func (s *SentPackets) OnLost(seqNum uint16, retransmitting bool) error {
 	return nil
 }
 
-func (s *SentPackets) SeqNumIndex(seqNum uint16) int {
+func (s *sentPackets) SeqNumIndex(seqNum uint16) int {
 	// The first sequence number is equal to `s.initSeqNum + uint16(1)`.
 	if seqNum > s.initSeqNum {
 		return int(seqNum - s.initSeqNum - uint16(1))
@@ -389,17 +401,20 @@ func (s *SentPackets) SeqNumIndex(seqNum uint16) int {
 	}
 }
 
-func (s *SentPackets) FirstUnackedSeqNum() (uint16, error) {
+func (s *sentPackets) FirstUnackedSeqNum() (uint16, error) {
 	if len(s.packets) == 0 {
 		return 0, ErrNoneAckNum
 	}
 
 	var seqNum uint16
 	lastAckNum, isNone := s.LastAckNum()
-	log.Debug("get laste unacked num",
-		"lastAckNum", lastAckNum, "isNone", isNone)
+	if s.logger != nil && s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+		s.logger.Trace("get laste innerMap num",
+			"lastAckNum", lastAckNum, "isNone", isNone)
+	}
+	const one = uint16(1)
 	if isNone {
-		seqNum = s.initSeqNum + uint16(1)
+		seqNum = s.initSeqNum + one
 	} else {
 		if s.packets[len(s.packets)-1].seqNum == lastAckNum {
 			return 0, ErrNoneAckNum

@@ -33,12 +33,14 @@ func NewUtpStream(
 	logger log.Logger,
 	cid *ConnectionId,
 	config *ConnectionConfig,
-	syn *Packet,
+	syn *packet,
 	socketEvents chan *socketEvent,
 	streamEvents chan *streamEvent,
 	connected chan error,
 ) *UtpStream {
-	logger.Debug("new a utp stream", "dst.peer", cid.Peer, "dst.send", cid.Send, "dst.recv", cid.Recv)
+	if logger.Enabled(BASE_CONTEXT, log.LevelInfo) {
+		logger.Info("new a utp stream", "dst.peer", cid.Peer, "dst.send", cid.Send, "dst.recv", cid.Recv)
+	}
 	connHandle := &sync.WaitGroup{}
 	connHandle.Add(1)
 	streamCtx, cancel := context.WithCancel(ctx)
@@ -89,7 +91,9 @@ func (s *UtpStream) ReadToEOF(ctx context.Context, buf *[]byte) (int, error) {
 			if !ok {
 				return n, nil
 			}
-			s.logger.Debug("read a new buf", "len", res.Len)
+			if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+				s.logger.Trace("read a new buf", "len", res.Len)
+			}
 			if len(res.Data) == 0 {
 				return n, res.Err
 			}
@@ -106,16 +110,16 @@ func (s *UtpStream) Write(ctx context.Context, buf []byte) (int, error) {
 	}
 	resCh := make(chan *readOrWriteResult, 1)
 	s.writes <- &queuedWrite{buf, 0, resCh}
-	s.logger.Debug("created a new queued write to writes channel",
-		"dst.peer", s.cid.Peer,
-		"buf.len", len(buf),
-		"len(s.writes)", len(s.writes),
-		"ptr(s)", fmt.Sprintf("%p", s),
-		"ptr(writes)", fmt.Sprintf("%p", s.writes))
-
+	if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+		s.logger.Trace("created a new queued write to writes channel",
+			"dst.peer", s.cid.Peer,
+			"buf.len", len(buf),
+			"len(s.writes)", len(s.writes),
+			"ptr(s)", fmt.Sprintf("%p", s),
+			"ptr(writes)", fmt.Sprintf("%p", s.writes))
+	}
 	var writtenLen int
 	var err error
-	s.logger.Debug("waiting for writes result...")
 	select {
 	case writeRes := <-resCh:
 		if writeRes != nil {
@@ -130,7 +134,7 @@ func (s *UtpStream) Write(ctx context.Context, buf []byte) (int, error) {
 }
 
 func (s *UtpStream) Close() {
-	s.logger.Debug("call close utp stream")
+	s.logger.Info("call close utp stream", "dst.Peer", s.cid.Peer, "dst.send", s.cid.Send, "dst.recv", s.cid.Recv)
 	s.closeOnce.Do(func() {
 		s.shutdown.Store(true)
 		s.connHandle.Wait()

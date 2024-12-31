@@ -16,12 +16,12 @@ const (
 
 type streamEvent struct {
 	Type   StreamEventType
-	Packet *Packet
+	Packet *packet
 }
 
 // socketEvent represents events related to a socket.
 type socketEvent struct {
 	Type         socketEventType
-	Packet       *Packet
+	Packet       *packet
 	ConnectionId ConnectionPeer
 }

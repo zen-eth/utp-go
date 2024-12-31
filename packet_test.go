@@ -115,7 +115,7 @@ func TestPacket(t *testing.T) {
 		}
 
 		// Create packet
-		packetInst := &Packet{
+		packetInst := &packet{
 			Header: header,
 			Eack:   selectiveAck,
 			Body:   payload,
