@@ -157,7 +157,7 @@ func TestOnSelectiveAck(t *testing.T) {
 func TestDetectLostPackets(t *testing.T) {
 	const (
 		COUNT = 10
-		START = COUNT - LOSS_THRESHOLD
+		START = COUNT - LossThreshold
 		DELAY = time.Millisecond * 100
 	)
 

@@ -9,7 +9,7 @@ import (
 	"github.com/google/btree"
 )
 
-const LOSS_THRESHOLD = 3
+const LossThreshold = 3
 
 var ErrInvalidAckNum = errors.New("invalid ack number")
 var ErrNoneAckNum = errors.New("none ack number")
@@ -306,7 +306,7 @@ func (s *sentPackets) DetectLostPackets(firstUnacked uint16) []uint16 {
 	for i := len(packets) - 1; i >= 0; i-- {
 		packetInst := packets[i]
 
-		if len(packetInst.acks) == 0 && acked >= LOSS_THRESHOLD {
+		if len(packetInst.acks) == 0 && acked >= LossThreshold {
 			lost = append(lost, packetInst.seqNum)
 		}
 		if len(packetInst.acks) > 0 {
@@ -404,7 +404,7 @@ func (s *sentPackets) FirstUnackedSeqNum() (uint16, error) {
 	var seqNum uint16
 	lastAckNum, isNone := s.LastAckNum()
 	if s.logger != nil && s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-		s.logger.Trace("get laste innerMap num",
+		s.logger.Trace("get last innerMap num",
 			"lastAckNum", lastAckNum, "isNone", isNone)
 	}
 	const one = uint16(1)

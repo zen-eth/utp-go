@@ -370,7 +370,7 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 		case <-c.ctx.Done():
 			handleCtxDone()
 			c.logger.Error("stream context done, will force stop...", "c.cid.peer", c.cid.Peer, "c.cid.Send", c.cid.Send, "c.cid.Recv", c.cid.Recv)
-			break
+			return c.ctx.Err()
 		}
 	afterSelect:
 		if stream.shutdown.Load() && c.state.stateType != ConnClosed {
@@ -459,7 +459,8 @@ func (c *connection) processWrites(now time.Time) {
 	case ConnConnecting:
 		return
 	case ConnClosed:
-		c.logger.Warn("connection is closed, will not process writing")
+		c.logger.Warn("connection is closed, will not process writing",
+			"c.cid.send", c.cid.Send, "c.cid.recv", c.cid.Recv)
 		result := &readOrWriteResult{
 			Err: c.state.Err,
 		}
@@ -956,7 +957,7 @@ func (c *connection) onData(seqNum uint16, data []byte) error {
 			}
 		}
 		// not closing should send data
-		if len(data) <= c.state.RecvBuf.Available() && !c.state.RecvBuf.WasWritten(seqNum) {
+		if len(data) <= c.state.RecvBuf.Available() {
 			err := c.state.RecvBuf.Write(data, seqNum)
 			if err != nil {
 				c.logger.Warn("write data to recv buffer, but available space is not enough",
@@ -988,7 +989,7 @@ func (c *connection) onFin(seqNum uint16, data []byte) error {
 					c.reset(ErrInvalidFin)
 				}
 			} else {
-				c.logger.Warn("received FIN", "seq", seqNum)
+				c.logger.Warn("received FIN", "seq", seqNum, "c.cid.send", c.cid.Send, "c.cid.recv", c.cid.Recv)
 				remoteFin := seqNum
 				c.state.closing.RemoteFin = &remoteFin
 				return c.state.RecvBuf.Write(data, seqNum)
@@ -998,7 +999,7 @@ func (c *connection) onFin(seqNum uint16, data []byte) error {
 			if err := c.state.RecvBuf.Write(data, seqNum); err != nil {
 				return err
 			}
-			c.logger.Warn("received FIN", "seq", seqNum)
+			c.logger.Warn("received FIN", "seq", seqNum, "c.cid.send", c.cid.Send, "c.cid.recv", c.cid.Recv)
 
 			c.state.closing = &ClosingRecord{
 				LocalFin:  nil,
