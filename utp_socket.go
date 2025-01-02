@@ -40,6 +40,7 @@ type StreamResult struct {
 }
 
 type Accept struct {
+	ctx    context.Context
 	stream chan *StreamResult
 	config *ConnectionConfig
 	cid    *ConnectionId
@@ -348,7 +349,7 @@ func (s *UtpSocket) handleNewAcceptWithCidEvent(acceptWithCid *Accept) {
 		if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 			s.logger.Trace("conn has already accepted", "key", incomingConnsKey)
 		}
-		s.selectAcceptHelper(s.ctx, acceptWithCid.cid, incomingConn.pkt, acceptWithCid, s.socketEvents)
+		s.selectAcceptHelper(acceptWithCid.ctx, acceptWithCid.cid, incomingConn.pkt, acceptWithCid, s.socketEvents)
 	} else {
 		if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 			s.logger.Trace("wait for the syn pkt arrive", "key", incomingConnsKey)
@@ -360,7 +361,7 @@ func (s *UtpSocket) handleNewAcceptWithCidEvent(acceptWithCid *Accept) {
 func (s *UtpSocket) handleNewAcceptEvent(accept *Accept) {
 	incomingAccept := s.nextIncomingConn()
 	if incomingAccept != nil {
-		s.selectAcceptHelper(s.ctx, incomingAccept.cid, incomingAccept.pkt, accept, s.socketEvents)
+		s.selectAcceptHelper(accept.ctx, incomingAccept.cid, incomingAccept.pkt, accept, s.socketEvents)
 	} else {
 		accept.stream <- &StreamResult{
 			err: errors.New("no incoming conn"),
@@ -464,6 +465,7 @@ func (s *UtpSocket) GenerateCid(peer ConnectionPeer, isInitiator bool, eventCh c
 
 func (s *UtpSocket) Accept(ctx context.Context, config *ConnectionConfig) (*UtpStream, error) {
 	accept := &Accept{
+		ctx:    ctx,
 		stream: make(chan *StreamResult, 1),
 		config: config,
 		hasCid: false,
@@ -486,6 +488,7 @@ func (s *UtpSocket) Accept(ctx context.Context, config *ConnectionConfig) (*UtpS
 
 func (s *UtpSocket) AcceptWithCid(ctx context.Context, cid *ConnectionId, config *ConnectionConfig) (*UtpStream, error) {
 	accept := &Accept{
+		ctx:    ctx,
 		stream: make(chan *StreamResult, 1),
 		config: config,
 		hasCid: true,
@@ -601,7 +604,7 @@ func (s *UtpSocket) awaitConnected(
 }
 
 func (s *UtpSocket) selectAcceptHelper(
-	ctx context.Context,
+	streamCtx context.Context,
 	cid *ConnectionId,
 	syn *packet,
 	accept *Accept,
@@ -624,7 +627,7 @@ func (s *UtpSocket) selectAcceptHelper(
 	s.putConnStream(cid.Hash(), streamEvents)
 
 	stream := NewUtpStream(
-		ctx,
+		streamCtx,
 		s.logger,
 		cid,
 		accept.config,

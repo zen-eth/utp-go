@@ -369,6 +369,8 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 			handleIdleTimeout()
 		case <-c.ctx.Done():
 			handleCtxDone()
+			c.logger.Error("stream context done, will force stop...", "c.cid.peer", c.cid.Peer, "c.cid.Send", c.cid.Send, "c.cid.Recv", c.cid.Recv)
+			break
 		}
 	afterSelect:
 		if stream.shutdown.Load() && c.state.stateType != ConnClosed {
@@ -906,6 +908,8 @@ func (c *connection) onState(seqNum, ackNum uint16) {
 		// NOTE: In a deviation from the specification, we initialize the ACK num
 		// to the sequence number of the SYN-ACK minus 1. This is consistent with
 		// the reference implementation and the libtorrent implementation.
+		c.logger.Info("accept a connect success, will initial connection state...",
+			"cid.send", c.cid.Send, "cid.recv", c.cid.Recv)
 		recvBuf := newReceiveBufferWithLogger(c.config.BufferSize, seqNum-1, c.logger) // wrapping subtraction for uint16
 		sendBuf := newSendBuffer(c.config.BufferSize)
 
@@ -1080,6 +1084,9 @@ func (c *connection) statePacket() *packet {
 }
 
 func (c *connection) retransmitLostPackets(now time.Time) {
+	if c.state.stateType != ConnConnected {
+		return
+	}
 	if !c.state.SentPackets.HasLostPackets() {
 		return
 	}

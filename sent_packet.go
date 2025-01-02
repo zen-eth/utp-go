@@ -73,12 +73,7 @@ func newSentPackets(initSeqNum uint16, congestionCtrl Controller, logger log.Log
 }
 
 func newSentPacketsWithoutLogger(initSeqNum uint16, congestionCtrl Controller) *sentPackets {
-	return &sentPackets{
-		packets:        make([]*sentPacket, 0),
-		initSeqNum:     initSeqNum,
-		lostPackets:    btree.NewOrderedG[uint16](2),
-		congestionCtrl: congestionCtrl,
-	}
+	return newSentPackets(initSeqNum, congestionCtrl, nil)
 }
 
 func (s *sentPackets) OnTimeout() {
