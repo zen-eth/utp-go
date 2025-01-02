@@ -251,13 +251,13 @@ func (s *UtpSocket) eventLoop() {
 				"count", n)
 		}
 		// Look for existing connection
-		if connStream := s.getConnStreamWithCids(accCID, weInitCID, peerInitCID); connStream != nil {
+		if connStream := s.getConnStreamWithCids(peerInitCID, weInitCID, accCID); connStream != nil {
 			connStream <- &streamEvent{
 				Type:   streamIncoming,
 				Packet: packetPtr,
 			}
 			if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-				s.logger.Trace("put a packet from a exist conn stream to conn stream", "connStream.len", len(connStream))
+				s.logger.Trace("recieve a packet for a exist conn stream", "connStream.len", len(connStream))
 			}
 		} else {
 			if packetPtr.Header.PacketType == st_syn {
@@ -515,7 +515,7 @@ func (s *UtpSocket) Connect(ctx context.Context, peer ConnectionPeer, config *Co
 
 	// Generate connection ID
 	cid := s.GenerateCid(peer, true, streamEvents)
-
+	s.logger.Info("connecting", "dst.peer.hash", peer.Hash(), "dst.send", cid.Send, "dst.recv", cid.Recv, "dst.hash", cid.Hash(), "dst.peer", peer)
 	// Create new UTP stream
 	s.putConnStream(cid.Hash(), streamEvents)
 	stream := NewUtpStream(
@@ -548,6 +548,7 @@ func (s *UtpSocket) ConnectWithCid(
 	cid *ConnectionId,
 	config *ConnectionConfig,
 ) (*UtpStream, error) {
+	s.logger.Info("connecting with cid", "dst.peer.hash", cid.Peer.Hash(), "dst.send", cid.Send, "dst.recv", cid.Recv, "dst.hash", cid.Hash(), "dst.peer", cid.Peer)
 	_, exists := s.getConnStream(cid.Hash())
 	if exists {
 		return nil, fmt.Errorf("connection ID unavailable")
@@ -674,7 +675,12 @@ func (s *UtpSocket) getConnStream(key string) (chan *streamEvent, bool) {
 func (s *UtpSocket) getConnStreamWithCids(peerInitCid *ConnectionId, ourInitCid *ConnectionId, accCid *ConnectionId) chan *streamEvent {
 	s.connsMutex.Lock()
 	defer s.connsMutex.Unlock()
-
+	if ch, exist := s.conns[accCid.Hash()]; exist {
+		if s.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
+			s.logger.Debug("get conn stream", "accInitCidKey", accCid.Hash(), "accCid.Send", accCid.Send, "accCid.Recv", accCid.Recv)
+		}
+		return ch
+	}
 	if ch, exist := s.conns[peerInitCid.Hash()]; exist {
 		if s.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
 			s.logger.Debug("get conn stream", "peerInitCidKey", peerInitCid.Hash(), "peerInitCid.Send", peerInitCid.Send, "peerInitCid.Recv", peerInitCid.Recv)
@@ -684,12 +690,6 @@ func (s *UtpSocket) getConnStreamWithCids(peerInitCid *ConnectionId, ourInitCid 
 	if ch, exist := s.conns[ourInitCid.Hash()]; exist {
 		if s.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
 			s.logger.Debug("get conn stream", "ourInitCidKey", ourInitCid.Hash(), "ourInitCid.Send", ourInitCid.Send, "ourInitCid.Recv", ourInitCid.Recv)
-		}
-		return ch
-	}
-	if ch, exist := s.conns[accCid.Hash()]; exist {
-		if s.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
-			s.logger.Debug("get conn stream", "accInitCidKey", accCid.Hash(), "accCid.Send", accCid.Send, "accCid.Recv", accCid.Recv)
 		}
 		return ch
 	}

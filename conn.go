@@ -379,8 +379,9 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 			c.logger.Info("uTP conn closing...", "err", c.state.Err, "c.cid.Send", c.cid.Send, "c.cid.Recv", c.cid.Recv)
 			c.processReads()
 			c.processWrites(time.Now())
-
-			c.state.RecvBuf.close()
+			if c.state.RecvBuf != nil {
+				c.state.RecvBuf.close()
+			}
 			c.socketEvents <- &socketEvent{
 				Type:         socketShutdown,
 				ConnectionId: c.cid,
