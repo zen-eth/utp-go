@@ -159,27 +159,33 @@ func (s *UtpSocket) readLoop() {
 
 	//for range s.readNextCh {
 	for {
-		n, from, err := s.socket.ReadFrom(buf)
-		if s.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
-			s.logger.Debug("read data from base socket", "n", n, "from", from)
-		}
-		if netutil.IsTemporaryError(err) {
-			// Ignore temporary read errors.
-			s.logger.Error("Temporary UDP read error", "err", err)
-			continue
-		} else if err != nil {
-			// Shut down the loop for permanent errors.
-			if !errors.Is(err, io.EOF) {
-				s.logger.Error("UDP read error", "err", err)
-			}
+		select {
+		case <-s.ctx.Done():
 			return
+		default:
+			n, from, err := s.socket.ReadFrom(buf)
+			if s.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
+				s.logger.Debug("read data from base socket", "n", n, "from", from)
+			}
+			if netutil.IsTemporaryError(err) {
+				// Ignore temporary read errors.
+				s.logger.Error("Temporary UDP read error", "err", err)
+				continue
+			} else if err != nil {
+				// Shut down the loop for permanent errors.
+				if !errors.Is(err, io.EOF) {
+					s.logger.Error("UDP read error", "err", err)
+				}
+				return
+			}
+			dstBuf := make([]byte, n)
+			copy(dstBuf, buf[:n])
+			s.incomingBuf <- &IncomingPacketRaw{peer: from, payload: dstBuf}
+			if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+				s.logger.Trace("recv a packet from remote", "buf.len", n, "from", from, "s.incomingBuf.len", len(s.incomingBuf))
+			}
 		}
-		dstBuf := make([]byte, n)
-		copy(dstBuf, buf[:n])
-		s.incomingBuf <- &IncomingPacketRaw{peer: from, payload: dstBuf}
-		if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-			s.logger.Trace("recv a packet from remote", "buf.len", n, "from", from, "s.incomingBuf.len", len(s.incomingBuf))
-		}
+
 	}
 }
 
@@ -208,12 +214,16 @@ func (s *UtpSocket) writeLoop() {
 				peer = event.ConnectionId
 			}
 			if _, err := s.socket.WriteTo(encoded, peer); err != nil {
+				var eackEncodeLen int
+				if event.Packet.Eack != nil {
+					eackEncodeLen = event.Packet.Eack.EncodedLen()
+				}
 				s.logger.Error("Failed to send uTP packet",
 					"error", err,
 					"cid", event.Packet.Header.ConnectionId,
 					"type", event.Packet.Header.PacketType,
-					"packet.Header.Encoded.len", event.Packet.Header.EncodeToBytes(),
-					"packet.Eack.Encoded.len", event.Packet.Eack.EncodedLen())
+					"encoded.eack.len", eackEncodeLen,
+					"encoded.len", len(encoded))
 			}
 
 		case socketShutdown:
