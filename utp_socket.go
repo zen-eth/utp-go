@@ -157,7 +157,6 @@ func WithSocket(ctx context.Context, socket Conn, logger log.Logger) *UtpSocket 
 func (s *UtpSocket) readLoop() {
 	buf := make([]byte, math.MaxUint16)
 
-	//for range s.readNextCh {
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -234,7 +233,6 @@ func (s *UtpSocket) writeLoop() {
 }
 
 func (s *UtpSocket) eventLoop() {
-	//s.readNextCh <- struct{}{}
 	s.logger.Info("utp socket eventLoop start...")
 	var n int
 
@@ -447,7 +445,7 @@ func (s *UtpSocket) GenerateCid(peer ConnectionPeer, isInitiator bool, eventCh c
 	generationAttemptCount := 0
 	for {
 		if generationAttemptCount > CidGenerationTryWarningCount {
-			s.logger.Warn("tried to generate a cid %d times", generationAttemptCount)
+			s.logger.Warn("tried to generate a cid", "times", generationAttemptCount)
 		}
 
 		// Generate random recv ID
