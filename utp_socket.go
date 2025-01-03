@@ -444,10 +444,6 @@ func (s *UtpSocket) GenerateCid(peer ConnectionPeer, isInitiator bool, eventCh c
 
 	generationAttemptCount := 0
 	for {
-		if generationAttemptCount > CidGenerationTryWarningCount {
-			s.logger.Warn("tried to generate a cid", "times", generationAttemptCount)
-		}
-
 		// Generate random recv ID
 		recv := RandomUint16()
 		var send uint16
@@ -465,10 +461,14 @@ func (s *UtpSocket) GenerateCid(peer ConnectionPeer, isInitiator bool, eventCh c
 			if eventCh != nil {
 				s.putConnStream(cid.Hash(), eventCh)
 			}
-			return cid
+			break
 		}
 		generationAttemptCount++
 	}
+	if generationAttemptCount > CidGenerationTryWarningCount {
+		s.logger.Warn("tried to generate a cid", "times", generationAttemptCount, s.connsStreamLen())
+	}
+	return cid
 }
 
 func (s *UtpSocket) Accept(ctx context.Context, config *ConnectionConfig) (*UtpStream, error) {
@@ -648,6 +648,12 @@ func (s *UtpSocket) selectAcceptHelper(
 	go s.awaitConnected(stream, accept, connected)
 }
 
+func (s *UtpSocket) connsStreamLen() int {
+	s.connsMutex.Lock()
+	defer s.connsMutex.Unlock()
+	return len(s.conns)
+}
+
 func (s *UtpSocket) removeConnStream(key string) {
 	s.connsMutex.Lock()
 	defer s.connsMutex.Unlock()
@@ -655,6 +661,13 @@ func (s *UtpSocket) removeConnStream(key string) {
 		s.logger.Trace("remove conn stream", "key", key)
 	}
 	delete(s.conns, key)
+}
+
+func (s *UtpSocket) getConnStream(key string) (chan *streamEvent, bool) {
+	s.connsMutex.Lock()
+	defer s.connsMutex.Unlock()
+	ch, ok := s.conns[key]
+	return ch, ok
 }
 
 func (s *UtpSocket) putConnStream(key string, streamCh chan *streamEvent) {
@@ -674,13 +687,6 @@ func (s *UtpSocket) sendShutdownEventToConns() {
 			Type: streamShutdown,
 		}
 	}
-}
-
-func (s *UtpSocket) getConnStream(key string) (chan *streamEvent, bool) {
-	s.connsMutex.Lock()
-	defer s.connsMutex.Unlock()
-	ch, ok := s.conns[key]
-	return ch, ok
 }
 
 func (s *UtpSocket) getConnStreamWithCids(peerInitCid *ConnectionId, ourInitCid *ConnectionId, accCid *ConnectionId) chan *streamEvent {
