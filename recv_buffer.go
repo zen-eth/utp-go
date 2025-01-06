@@ -44,9 +44,10 @@ func createOrGetPool(size int) *sync.Pool {
 }
 
 func newReceiveBuffer(size int, initSeqNum uint16) *receiveBuffer {
-	pool := createOrGetPool(size)
+	//buf := createOrGetPool(size).Get().([]byte)
+	buf := make([]byte, size)
 	return &receiveBuffer{
-		buf:        pool.Get().([]byte),
+		buf:        buf,
 		offset:     0,
 		pending:    btree.New(2),
 		initSeqNum: initSeqNum,
@@ -55,10 +56,11 @@ func newReceiveBuffer(size int, initSeqNum uint16) *receiveBuffer {
 }
 
 func newReceiveBufferWithLogger(size int, initSeqNum uint16, logger log.Logger) *receiveBuffer {
-	pool := createOrGetPool(size)
+	//buf := createOrGetPool(size).Get().([]byte)
+	buf := make([]byte, size)
 	return &receiveBuffer{
 		logger:     logger,
-		buf:        pool.Get().([]byte),
+		buf:        buf,
 		offset:     0,
 		pending:    btree.New(2),
 		initSeqNum: initSeqNum,

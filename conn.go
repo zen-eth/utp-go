@@ -175,7 +175,7 @@ func newConnection(
 		peerRecvWindow = math.MaxUint32
 	}
 
-	unackTimeoutCh := make(chan *packet, 100000)
+	unackTimeoutCh := make(chan *packet, 1000)
 	handleExpiration := func(key any, pkt *packet) {
 		unackTimeoutCh <- pkt
 	}
@@ -190,13 +190,12 @@ func newConnection(
 		peerTsDiff:     peerTsDiff,
 		peerRecvWindow: peerRecvWindow,
 		socketEvents:   socketEvents,
-		//unacked:        newDelayMap[*packet](),
 		unacked:        newTimeWheel[*packet](config.InitialTimeout/4, 8, handleExpiration),
 		unackTimeoutCh: unackTimeoutCh,
 		reads:          reads,
-		readable:       make(chan struct{}, 10000000),
+		readable:       make(chan struct{}, 1000),
 		pendingWrites:  make([]*queuedWrite, 0),
-		writable:       make(chan struct{}, 10000000),
+		writable:       make(chan struct{}, 1000),
 		latestTimeout:  nil,
 	}
 }

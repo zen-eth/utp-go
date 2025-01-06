@@ -286,7 +286,7 @@ func (s *UtpSocket) eventLoop() {
 					}
 					s.removeAwaiting(cidHash)
 					connected := make(chan error, 1)
-					newConnStream := make(chan *streamEvent, 100000)
+					newConnStream := make(chan *streamEvent, 1000)
 					s.putConnStream(cidHash, newConnStream)
 					stream := NewUtpStream(s.ctx, s.logger, cid, accept.config, packetPtr, s.socketEvents, newConnStream, connected)
 					go s.awaitConnected(stream, accept, connected)
@@ -522,7 +522,7 @@ func (s *UtpSocket) AcceptWithCid(ctx context.Context, cid *ConnectionId, config
 func (s *UtpSocket) Connect(ctx context.Context, peer ConnectionPeer, config *ConnectionConfig) (*UtpStream, error) {
 	// Create channels for connection status and events
 	connectedCh := make(chan error, 1)
-	streamEvents := make(chan *streamEvent, 100000)
+	streamEvents := make(chan *streamEvent, 1000)
 
 	// Generate connection ID
 	cid := s.GenerateCid(peer, true, streamEvents)
@@ -566,7 +566,7 @@ func (s *UtpSocket) ConnectWithCid(
 	}
 
 	connected := make(chan error, 1)
-	streamEvents := make(chan *streamEvent, 100000)
+	streamEvents := make(chan *streamEvent, 1000)
 
 	s.putConnStream(cid.Hash(), streamEvents)
 	stream := NewUtpStream(
@@ -627,7 +627,7 @@ func (s *UtpSocket) selectAcceptHelper(
 	}
 
 	connected := make(chan error, 1)
-	streamEvents := make(chan *streamEvent, 100000)
+	streamEvents := make(chan *streamEvent, 1000)
 
 	if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 		s.logger.Trace("put a conn stream at selectAcceptHelper", "cid.Peer", cid.Peer, "cid", cid)
