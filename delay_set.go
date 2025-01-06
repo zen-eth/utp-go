@@ -13,6 +13,7 @@ type timeWheelItem[P any] struct {
 }
 
 type timeWheel[P any] struct {
+	stopped          chan struct{}
 	interval         time.Duration
 	slots            []map[any]*timeWheelItem[P]
 	ticker           *time.Ticker
@@ -25,6 +26,7 @@ type timeWheel[P any] struct {
 
 func newTimeWheel[P any](interval time.Duration, slotNum int, handleExpireFunc expireFunc[P]) *timeWheel[P] {
 	tw := &timeWheel[P]{
+		stopped:          make(chan struct{}),
 		interval:         interval,
 		slots:            make([]map[any]*timeWheelItem[P], slotNum),
 		current:          0,
@@ -83,19 +85,24 @@ func (tw *timeWheel[P]) remove(key any) {
 }
 
 func (tw *timeWheel[P]) run() {
-	for range tw.ticker.C {
-		tw.mu.Lock()
-		currentSlot := tw.slots[tw.current]
-		// clear current slot
-		if len(currentSlot) > 0 {
-			for key, item := range currentSlot {
-				// process expirations here
-				delete(currentSlot, key)
-				tw.handleExpireFunc(key, item.value)
+	for {
+		select {
+		case <-tw.ticker.C:
+			tw.mu.Lock()
+			currentSlot := tw.slots[tw.current]
+			// clear current slot
+			if len(currentSlot) > 0 {
+				for key, item := range currentSlot {
+					// process expirations here
+					delete(currentSlot, key)
+					tw.handleExpireFunc(key, item.value)
+				}
 			}
+			tw.current = (tw.current + 1) % tw.slotNum
+			tw.mu.Unlock()
+		case <-tw.stopped:
+			return
 		}
-		tw.current = (tw.current + 1) % tw.slotNum
-		tw.mu.Unlock()
 	}
 }
 
@@ -111,4 +118,5 @@ func (tw *timeWheel[P]) Len() int {
 
 func (tw *timeWheel[P]) stop() {
 	tw.ticker.Stop()
+	close(tw.stopped)
 }

@@ -201,6 +201,7 @@ func newConnection(
 }
 
 func (c *connection) eventLoop(stream *UtpStream) error {
+	defer c.unacked.stop()
 	if c.logger.Enabled(BASE_CONTEXT, log.LevelInfo) {
 		c.logger.Info("uTP conn starting", "dst.peer", c.cid.Peer, "cid.Send", c.cid.Send, "cid.Recv", c.cid.Recv)
 	}
