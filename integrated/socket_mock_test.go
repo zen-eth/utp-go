@@ -12,7 +12,7 @@ package integrated
 import (
 	reflect "reflect"
 
-	utp_go "github.com/optimism-java/utp-go"
+	utp_go "github.com/zen-eth/utp-go"
 	gomock "go.uber.org/mock/gomock"
 )
 

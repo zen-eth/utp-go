@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/log"
-	utp "github.com/optimism-java/utp-go"
 	"github.com/stretchr/testify/require"
+	utp "github.com/zen-eth/utp-go"
 )
 
 const expectedIdleTimeout = utp.DefaultMaxIdleTimeout
@@ -69,7 +69,7 @@ func TestCloseWhenWriteCompletes(t *testing.T) {
 	}
 
 	// Data to send
-	const dataLen = 100
+	const dataLen = 1_000_000 * 50
 	data := bytes.Repeat([]byte{0xa5}, dataLen)
 
 	// Send data
@@ -109,7 +109,7 @@ func TestCloseWhenWriteCompletes(t *testing.T) {
 	sendWg.Wait()
 
 	// Close stream with timeout
-	closeCtx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	closeCtx, cancel := context.WithTimeout(ctx, 60*time.Millisecond)
 	defer cancel()
 
 	done := make(chan struct{})

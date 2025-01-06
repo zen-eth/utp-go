@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/log"
-	utp "github.com/optimism-java/utp-go"
+	utp "github.com/zen-eth/utp-go"
 )
 
 var (
@@ -24,7 +24,6 @@ func (p *MockConnectedPeer) Hash() string {
 }
 
 type MockUdpSocket struct {
-	logger   log.Logger
 	sendCh   chan []byte
 	recvCh   chan []byte
 	onlyPeer utp.ConnectionPeer
@@ -32,19 +31,17 @@ type MockUdpSocket struct {
 }
 
 func (s *MockUdpSocket) ReadFrom(b []byte) (int, utp.ConnectionPeer, error) {
-	select {
-	case buf, ok := <-s.recvCh:
-		if !ok {
-			return 0, nil, ErrChClosed
-		}
-		n := len(buf)
-		if len(b) < len(buf) {
-			return 0, nil, ErrChClosed
-		}
-		log.Debug("read a raw packet from mocksocket", "from", s.onlyPeer, "len(buf)", len(buf), "buf", hex.EncodeToString(buf))
-		copy(b[:n], buf)
-		return n, s.onlyPeer, nil
+	buf, ok := <-s.recvCh
+	if !ok {
+		return 0, nil, ErrChClosed
 	}
+	n := len(buf)
+	if len(b) < len(buf) {
+		return 0, nil, ErrChClosed
+	}
+	log.Debug("read a raw packet from mocksocket", "from", s.onlyPeer, "len(buf)", len(buf), "buf", hex.EncodeToString(buf))
+	copy(b[:n], buf)
+	return n, s.onlyPeer, nil
 }
 func (s *MockUdpSocket) WriteTo(b []byte, dst utp.ConnectionPeer) (int, error) {
 	if dst.Hash() != s.onlyPeer.Hash() {
@@ -54,12 +51,9 @@ func (s *MockUdpSocket) WriteTo(b []byte, dst utp.ConnectionPeer) (int, error) {
 		log.Debug("MockUdpSocket is down, cannot send packet")
 		return len(b), nil
 	}
-	select {
-	case s.sendCh <- b:
-		log.Debug("Sent a packet out to dest", "dest.peer", dst, "len", len(b), "data", hex.EncodeToString(b))
-		return len(b), nil
-	}
-	return 0, nil
+	s.sendCh <- b
+	log.Debug("Sent a packet out to dest", "dest.peer", dst, "len", len(b), "data", hex.EncodeToString(b))
+	return len(b), nil
 }
 func (s *MockUdpSocket) Close() error {
 	return nil
