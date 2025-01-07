@@ -909,7 +909,7 @@ func (c *connection) onState(seqNum, ackNum uint16) {
 		// NOTE: In a deviation from the specification, we initialize the ACK num
 		// to the sequence number of the SYN-ACK minus 1. This is consistent with
 		// the reference implementation and the libtorrent implementation.
-		c.logger.Info("accept a connect success, will initial connection state...",
+		c.logger.Info("connect success, will initial connection state...",
 			"cid.send", c.cid.Send, "cid.recv", c.cid.Recv)
 		recvBuf := newReceiveBufferWithLogger(c.config.BufferSize, seqNum-1, c.logger) // wrapping subtraction for uint16
 		sendBuf := newSendBuffer(c.config.BufferSize)
