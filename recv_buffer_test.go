@@ -2,6 +2,8 @@ package utp_go
 
 import (
 	"bytes"
+	"math"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -235,4 +237,43 @@ func TestSelectiveAck(t *testing.T) {
 	if selectiveAck != nil {
 		t.Errorf("expected no selective ack, got %v", selectiveAck)
 	}
+}
+
+func TestSelectiveACKOverflow(t *testing.T) {
+	initSeqNum := uint16(math.MaxUint16) - 2
+	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
+
+	// 初始时无选择性ACK
+	nilSelectiveAck := buf.SelectiveAck()
+	require.Nil(t, nilSelectiveAck, "Expected no selective ACK initially")
+
+	data := make([]byte, 64)
+	for i := range data {
+		data[i] = 0xef
+	}
+
+	// 写入乱序包（注意Go中uint16自动处理溢出）
+	seqNum := uint16(initSeqNum + 2) // 65533 + 2 = 65535 (overflow)
+	buf.Write(data, seqNum)
+
+	seqNum = initSeqNum + 3 // 65533 + 3 = 0 (overflow)
+	buf.Write(data, seqNum)
+
+	seqNum = initSeqNum + 5 // 65534 + 5 = 2 (overflow)
+	buf.Write(data, seqNum)
+
+	// 验证选择性ACK
+	notNilSelectiveAck := buf.SelectiveAck()
+	require.NotNil(t, notNilSelectiveAck, "Expected a selective ACK initially")
+	acked := notNilSelectiveAck.Acked()
+	require.NotNil(t, acked, "Expected a acked list")
+
+	// 构造期望的确认位图
+	expected := make([]bool, 32)
+	expected[0] = true // 对应序列号0（起始0+0）
+	expected[1] = true // 对应序列号1（起始0+1）
+	expected[3] = true // 对应序列号3（起始0+3）
+
+	require.True(t, reflect.DeepEqual(notNilSelectiveAck.Acked(), expected),
+		"Expected acked %v, got %v", expected, notNilSelectiveAck.Acked())
 }

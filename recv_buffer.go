@@ -8,6 +8,10 @@ import (
 	"github.com/google/btree"
 )
 
+const (
+	MAX_SELECTIVE_ACK_COUNT int = 32 * 63
+)
+
 var (
 	bufferPools = make(map[int]*sync.Pool)
 )
@@ -163,22 +167,28 @@ func (rb *receiveBuffer) SelectiveAck() *SelectiveAck {
 		return nil
 	}
 
-	next := rb.AckNum() + 2
+	lastAck := rb.AckNum() + 2
 	acked := make([]bool, 0)
 
+	pendingSeqs := make(map[uint16]bool, rb.pending.Len())
 	rb.pending.Ascend(func(i btree.Item) bool {
 		item := i.(*pendingItem)
-		for item.seqNum != next {
-			acked = append(acked, false)
-			next++
-		}
-		acked = append(acked, true)
-		next++
+		pendingSeqs[item.seqNum] = true
 		return true
 	})
 
+	for len(pendingSeqs) != 0 && len(acked) < MAX_SELECTIVE_ACK_COUNT {
+		if _, ok := pendingSeqs[lastAck]; ok {
+			acked = append(acked, true)
+			delete(pendingSeqs, lastAck)
+		} else {
+			acked = append(acked, false)
+		}
+		lastAck++
+	}
+
 	if rb.logger != nil && rb.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-		rb.logger.Trace("will new selective ack", "endSeq", next, "acked.len", len(acked))
+		rb.logger.Trace("will new selective ack", "endSeq", lastAck, "acked.len", len(acked))
 	}
 
 	return NewSelectiveAck(acked)

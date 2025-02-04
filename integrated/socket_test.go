@@ -12,7 +12,6 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"runtime/pprof"
-	"runtime/trace"
 	"sync"
 	"testing"
 	"time"
@@ -29,23 +28,23 @@ var (
 )
 
 func TestManyConcurrentTransfers(t *testing.T) {
-	// 设置最大线程数为CPU核心数
-	//runtime.GOMAXPROCS(16)
-	traceFile, _ := os.Create("concurrency_trace.prof")
-	_ = trace.Start(traceFile)
-	defer trace.Stop()
+	// // 设置最大线程数为CPU核心数
+	// //runtime.GOMAXPROCS(16)
+	// traceFile, _ := os.Create("concurrency_trace.prof")
+	// _ = trace.Start(traceFile)
+	// defer trace.Stop()
 
-	// CPU 分析
-	cpuFile, _ := os.Create("concurrency_cpu.prof")
-	_ = pprof.StartCPUProfile(cpuFile)
-	defer pprof.StopCPUProfile()
+	// // CPU 分析
+	// cpuFile, _ := os.Create("concurrency_cpu.prof")
+	// _ = pprof.StartCPUProfile(cpuFile)
+	// defer pprof.StopCPUProfile()
 
-	//http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
-	//go func() {
-	//	log.Info("run fgprof", "err", http.ListenAndServe(":6060", nil))
-	//}()
+	// //http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
+	// //go func() {
+	// //	log.Info("run fgprof", "err", http.ListenAndServe(":6060", nil))
+	// //}()
 
-	// 内存分析
+	// // 内存分析
 	memFile, _ := os.Create("concurrency_mem.prof")
 	defer func() {
 		_ = pprof.WriteHeapProfile(memFile)

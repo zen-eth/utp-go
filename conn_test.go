@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	TEST_BUFFER_SIZE = 2048
-	TEST_DELAYtime   = time.Millisecond * 100
+	TEST_BUFFER_SIZE     = 2048
+	TEST_DELAYtime       = time.Millisecond * 100
+	TEST_INITIAL_TIMEOUT = time.Second
 )
 
 func CreateTestConnection(endpoint Endpoint) *connection {
@@ -34,6 +35,10 @@ func CreateTestConnection(endpoint Endpoint) *connection {
 		Peer: peer,
 	}
 
+	unackTimeoutCh := make(chan *packet, 1000)
+	handleExpiration := func(key any, pkt *packet) {
+		unackTimeoutCh <- pkt
+	}
 	conn := &connection{
 		logger:         log.Root(),
 		state:          NewConnState(make(chan error, 1)),
@@ -43,7 +48,7 @@ func CreateTestConnection(endpoint Endpoint) *connection {
 		peerTsDiff:     100 * time.Millisecond,
 		peerRecvWindow: math.MaxUint32,
 		socketEvents:   socketEvents,
-		unacked:        newDelayMap[*packet](),
+		unacked:        newTimeWheel[*packet](TEST_INITIAL_TIMEOUT/4, 8, handleExpiration),
 		reads:          reads,
 		readable:       make(chan struct{}, 1),
 		pendingWrites:  make([]*queuedWrite, 0),
