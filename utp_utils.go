@@ -50,8 +50,6 @@ func DurationBetween(earlier uint32, later uint32) time.Duration {
 	}
 }
 
-var randGenerator = fastrand.RNG{}
-
 func RandomUint16() uint16 {
-	return uint16(randGenerator.Uint32n(65535))
+	return uint16(fastrand.Uint32n(65535))
 }
