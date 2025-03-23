@@ -755,9 +755,5 @@ func CidFromPacket(
 		recv = packet.Header.ConnectionId - 1 // wrapping sub
 	}
 
-	return &ConnectionId{
-		Send: send,
-		Recv: recv,
-		Peer: src,
-	}
+	return NewConnectionId(src, recv, send)
 }
