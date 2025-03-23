@@ -26,6 +26,7 @@ type UtpStream struct {
 	connHandle   *sync.WaitGroup
 	conn         *connection
 	closeOnce    sync.Once
+	readLocker   sync.Mutex
 }
 
 func NewUtpStream(
@@ -58,7 +59,6 @@ func NewUtpStream(
 	}
 
 	utpStream.conn = newConnection(streamCtx, logger, cid, config, syn, connected, socketEvents, utpStream.reads)
-
 	go utpStream.start()
 	return utpStream
 }
@@ -77,6 +77,8 @@ func (s *UtpStream) start() {
 }
 
 func (s *UtpStream) ReadToEOF(ctx context.Context, buf *[]byte) (int, error) {
+	s.readLocker.Lock()
+	defer s.readLocker.Unlock()
 	n := 0
 	data := make([]byte, 0)
 	for {
