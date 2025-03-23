@@ -456,6 +456,7 @@ func (s *UtpSocket) GenerateCid(peer ConnectionPeer, isInitiator bool, eventCh c
 
 		cid.Send = send
 		cid.Recv = recv
+		cid.hash = genHash(cid)
 
 		if _, exists := s.getConnStream(cid.Hash()); !exists {
 			if eventCh != nil {

@@ -58,18 +58,29 @@ type ConnectionId struct {
 	hash string
 }
 
-func (id *ConnectionId) Hash() string {
-	if id.hash == "" {
-		str := fmt.Sprintf("%d:%d:%v", id.Send, id.Recv, id.Peer.Hash())
-		hasher := hasherPool.Get().(hash.Hash)
-		defer func() {
-			hasher.Reset()
-			hasherPool.Put(hasher)
-		}()
-		hasher.Write([]byte(str))
-		bytes := hasher.Sum(nil)[:20]
-		id.hash = hex.EncodeToString(bytes)
+func NewConnectionId(peer ConnectionPeer, recvId uint16, sendId uint16) *ConnectionId {
+	connId := &ConnectionId{
+		Peer: peer,
+		Recv: recvId,
+		Send: sendId,
 	}
+	connId.hash = genHash(connId)
+	return connId
+}
+
+func genHash(connId *ConnectionId) string {
+	str := fmt.Sprintf("%d:%d:%v", connId.Send, connId.Recv, connId.Peer.Hash())
+	hasher := hasherPool.Get().(hash.Hash)
+	defer func() {
+		hasher.Reset()
+		hasherPool.Put(hasher)
+	}()
+	hasher.Write([]byte(str))
+	bytes := hasher.Sum(nil)[:20]
+	return hex.EncodeToString(bytes)
+}
+
+func (id *ConnectionId) Hash() string {
 	return id.hash
 }
 
