@@ -308,7 +308,8 @@ func (s *UtpSocket) eventLoop() {
 				if packetPtr.Header.PacketType != st_reset {
 					randSeqNum := RandomUint16()
 					resetPacket := NewPacketBuilder(st_reset, packetPtr.Header.ConnectionId, uint32(time.Now().UnixMicro()), 100_000, randSeqNum).Build()
-					s.socketEvents <- &socketEvent{outgoing, resetPacket, incomingRaw.peer}
+
+					s.socketEvents <- newOutgoingSocketEvent(resetPacket, incomingRaw.peer)
 				}
 			}
 		}

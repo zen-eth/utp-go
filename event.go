@@ -25,3 +25,18 @@ type socketEvent struct {
 	Packet       *packet
 	ConnectionId ConnectionPeer
 }
+
+func newOutgoingSocketEvent(p *packet, cid ConnectionPeer) *socketEvent {
+	return &socketEvent{
+		Type:         outgoing,
+		Packet:       p,
+		ConnectionId: cid,
+	}
+}
+
+func newShutdownSocketEvent(cid ConnectionPeer) *socketEvent {
+	return &socketEvent{
+		Type:         socketShutdown,
+		ConnectionId: cid,
+	}
+}

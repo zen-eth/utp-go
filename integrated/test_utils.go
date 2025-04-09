@@ -15,6 +15,45 @@ var (
 	ErrBufferToSmall = errors.New("buffer too small for perfect link")
 )
 
+type LinkDecider interface {
+	shouldSend() bool
+}
+
+type ManualLinkDecider struct {
+	upSwitch atomic.Bool
+}
+
+func newManualLinkDecider() *ManualLinkDecider {
+	decider := &ManualLinkDecider{}
+	decider.upSwitch.Store(true)
+	return decider
+}
+
+func (d *ManualLinkDecider) shouldSend() bool {
+	return d.upSwitch.Load()
+}
+
+type DropFirstNSent struct {
+	targetDropsN int
+	curDropsN    int
+}
+
+func newDropFirstNSent(dropsN int) *DropFirstNSent {
+	return &DropFirstNSent{
+		targetDropsN: dropsN,
+		curDropsN:    0,
+	}
+}
+
+func (d *DropFirstNSent) shouldSend() bool {
+	if d.curDropsN < d.targetDropsN {
+		d.curDropsN += 1
+		return false
+	} else {
+		return true
+	}
+}
+
 type MockConnectedPeer struct {
 	name string
 }
@@ -24,10 +63,10 @@ func (p *MockConnectedPeer) Hash() string {
 }
 
 type MockUdpSocket struct {
-	sendCh   chan []byte
-	recvCh   chan []byte
-	onlyPeer utp.ConnectionPeer
-	upStatus *atomic.Bool
+	sendCh      chan []byte
+	recvCh      chan []byte
+	onlyPeer    utp.ConnectionPeer
+	linkDecider LinkDecider
 }
 
 func (s *MockUdpSocket) ReadFrom(b []byte) (int, utp.ConnectionPeer, error) {
@@ -47,8 +86,8 @@ func (s *MockUdpSocket) WriteTo(b []byte, dst utp.ConnectionPeer) (int, error) {
 	if dst.Hash() != s.onlyPeer.Hash() {
 		panic(fmt.Sprintf("MockUdpSocket only supports Writing To one peer: dst.peer = %s, onlyPeer = %s", dst.Hash(), s.onlyPeer.Hash()))
 	}
-	if !s.upStatus.Load() {
-		log.Debug("MockUdpSocket is down, cannot send packet")
+	if !s.linkDecider.shouldSend() {
+		log.Debug("Dropping packet", "dst.peer", dst.Hash(), "onlyPeer", s.onlyPeer.Hash())
 		return len(b), nil
 	}
 	s.sendCh <- b
@@ -59,44 +98,40 @@ func (s *MockUdpSocket) Close() error {
 	return nil
 }
 
-func buildLinkPair() (*MockUdpSocket, *MockUdpSocket) {
+func buildLinkPair(aDecider LinkDecider, bDecider LinkDecider) (*MockUdpSocket, *MockUdpSocket) {
 	peerA, peerB := &MockConnectedPeer{name: "peerA"}, &MockConnectedPeer{name: "peerB"}
 	peerACh, peerBCh := make(chan []byte, 1), make(chan []byte, 1)
 
 	// A -> B
 	a, b := &MockUdpSocket{
-		sendCh:   peerACh,
-		recvCh:   peerBCh,
-		onlyPeer: peerB,
-		upStatus: &atomic.Bool{},
+		sendCh:      peerACh,
+		recvCh:      peerBCh,
+		onlyPeer:    peerB,
+		linkDecider: aDecider,
 	}, &MockUdpSocket{
 		// B -> A
-		sendCh:   peerBCh,
-		recvCh:   peerACh,
-		onlyPeer: peerA,
-		upStatus: &atomic.Bool{},
+		sendCh:      peerBCh,
+		recvCh:      peerACh,
+		onlyPeer:    peerA,
+		linkDecider: bDecider,
 	}
-	a.upStatus.Store(true)
-	b.upStatus.Store(true)
 	return a, b
 }
 
 func buildCidPair(socketA *MockUdpSocket, socketB *MockUdpSocket, lowerId uint16) (*utp.ConnectionId, *utp.ConnectionId) {
 	higherId := lowerId + 1
-	cidA, cidB := &utp.ConnectionId{
-		Send: higherId,
-		Recv: lowerId,
-		Peer: socketA.onlyPeer,
-	}, &utp.ConnectionId{
-		Send: lowerId,
-		Recv: higherId,
-		Peer: socketB.onlyPeer,
-	}
+	cidA, cidB := utp.NewConnectionId(socketA.onlyPeer, lowerId, higherId), utp.NewConnectionId(socketB.onlyPeer, higherId, lowerId)
 	return cidA, cidB
 }
 
 func buildConnectedPair() (*MockUdpSocket, *utp.ConnectionId, *MockUdpSocket, *utp.ConnectionId) {
-	socketA, socketB := buildLinkPair()
+	socketA, socketB := buildLinkPair(newManualLinkDecider(), newManualLinkDecider())
+	cidA, cidB := buildCidPair(socketA, socketB, 100)
+	return socketA, cidA, socketB, cidB
+}
+
+func buildLinkDropSentPair(n int) (*MockUdpSocket, *utp.ConnectionId, *MockUdpSocket, *utp.ConnectionId) {
+	socketA, socketB := buildLinkPair(newManualLinkDecider(), newDropFirstNSent(n))
 	cidA, cidB := buildCidPair(socketA, socketB, 100)
 	return socketA, cidA, socketB, cidB
 }

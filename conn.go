@@ -119,16 +119,15 @@ type readOrWriteResult struct {
 }
 
 type connection struct {
-	ctx            context.Context
-	logger         log.Logger
-	state          *ConnState
-	cid            *ConnectionId
-	config         *ConnectionConfig
-	endpoint       *Endpoint
-	peerTsDiff     time.Duration
-	peerRecvWindow uint32
-	socketEvents   chan *socketEvent
-	//unacked        *delayMap[*packet]
+	ctx              context.Context
+	logger           log.Logger
+	state            *ConnState
+	cid              *ConnectionId
+	config           *ConnectionConfig
+	endpoint         *Endpoint
+	peerTsDiff       time.Duration
+	peerRecvWindow   uint32
+	socketEvents     chan *socketEvent
 	unacked          *timeWheel[*packet]
 	unackTimeoutCh   chan *packet
 	handleExpiration expireFunc[*packet]
@@ -137,6 +136,7 @@ type connection struct {
 	pendingWrites    []*queuedWrite
 	writable         chan struct{}
 	latestTimeout    *time.Time
+	synState         *packet
 }
 
 func newConnection(
@@ -210,11 +210,7 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 	if c.endpoint.Type == Initiator {
 		synSeqNum := c.endpoint.SynNum
 		synPkt := c.synPacket(synSeqNum)
-		c.socketEvents <- &socketEvent{
-			Type:         outgoing,
-			Packet:       synPkt,
-			ConnectionId: c.cid,
-		}
+		c.socketEvents <- newOutgoingSocketEvent(synPkt, c.cid)
 		if c.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
 			c.logger.Debug("put a initial syn packet to delay map", "socketEvents.len", len(c.socketEvents), "dst.peer", c.cid.Peer, "synSeqNum", synSeqNum)
 		}
@@ -222,18 +218,16 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 
 		c.endpoint.Attempts = 1
 	} else {
+		// Acceptor connection
 		syn := c.endpoint.SynNum
 		synAck := c.endpoint.SynAck
 
-		statePacket := c.statePacket()
+		c.synState = c.statePacket()
+
 		if c.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
 			c.logger.Debug("a initial state packet", "peer", c.cid.Peer, "cid.Send", c.cid.Send, "cid.Recv", c.cid.Recv)
 		}
-		c.socketEvents <- &socketEvent{
-			Type:         outgoing,
-			Packet:       statePacket,
-			ConnectionId: c.cid,
-		}
+		c.socketEvents <- newOutgoingSocketEvent(c.synState, c.cid)
 
 		recvBuf := newReceiveBufferWithLogger(c.config.BufferSize, syn, c.logger)
 		sendBuf := newSendBuffer(c.config.BufferSize)
@@ -384,10 +378,7 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 			if c.state.RecvBuf != nil {
 				c.state.RecvBuf.close()
 			}
-			c.socketEvents <- &socketEvent{
-				Type:         socketShutdown,
-				ConnectionId: c.cid,
-			}
+			c.socketEvents <- newShutdownSocketEvent(c.cid)
 			return c.state.Err
 		}
 	}
@@ -663,12 +654,7 @@ func (c *connection) onTimeout(packet *packet, now time.Time) {
 			c.unacked.put(seq, packet, timeout)
 
 			// Re-send SYN packet
-			synPacket := c.synPacket(seq)
-			c.socketEvents <- &socketEvent{
-				Type:         outgoing,
-				Packet:       synPacket,
-				ConnectionId: c.cid,
-			}
+			c.socketEvents <- newOutgoingSocketEvent(c.synPacket(seq), c.cid)
 		}
 
 	case ConnConnected:
@@ -769,7 +755,18 @@ func (c *connection) onPacket(packet *packet, now time.Time) {
 
 	// Send STATE packet if appropriate
 	switch packet.Header.PacketType {
-	case st_syn, st_data, st_fin:
+	case st_syn:
+		if c.synState == nil {
+			// Teh synState is generated at the beginning of the eventLoop
+			c.logger.Warn("missing SYN STATE, ")
+			if statePacket := c.statePacket(); statePacket != nil {
+				c.synState = statePacket
+			}
+		}
+
+		c.socketEvents <- newOutgoingSocketEvent(c.synState, c.cid)
+
+	case st_data, st_fin:
 		if statePacket := c.statePacket(); statePacket != nil {
 			if c.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
 				c.logger.Debug("create a state packet to send out",
@@ -777,12 +774,8 @@ func (c *connection) onPacket(packet *packet, now time.Time) {
 					"packet.ackNum", statePacket.Header.AckNum,
 					"packet.cid", statePacket.Header.ConnectionId)
 			}
-			event := socketEvent{
-				Type:         outgoing,
-				Packet:       statePacket,
-				ConnectionId: c.cid,
-			}
-			c.socketEvents <- &event
+
+			c.socketEvents <- newOutgoingSocketEvent(statePacket, c.cid)
 		}
 	}
 
@@ -1145,10 +1138,5 @@ func (c *connection) transmit(packet *packet, now time.Time) {
 	c.state.SentPackets.OnTransmit(packet.Header.SeqNum, packet.Header.PacketType, payload, length, now)
 	c.unacked.put(packet.Header.SeqNum, packet, c.state.SentPackets.Timeout())
 
-	outbound := socketEvent{
-		Type:         outgoing,
-		Packet:       packet,
-		ConnectionId: c.cid,
-	}
-	c.socketEvents <- &outbound
+	c.socketEvents <- newOutgoingSocketEvent(packet, c.cid)
 }
