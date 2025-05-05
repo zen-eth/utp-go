@@ -35,27 +35,39 @@ func TestManyConcurrentTransfers(t *testing.T) {
 	// defer trace.Stop()
 
 	// // CPU 分析
-	// cpuFile, _ := os.Create("concurrency_cpu.prof")
-	// _ = pprof.StartCPUProfile(cpuFile)
-	// defer pprof.StopCPUProfile()
+	//cpuFile, _ := os.Create("concurrency_cpu.prof")
+	//_ = pprof.StartCPUProfile(cpuFile)
+	//defer pprof.StopCPUProfile()
 
-	// //http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
-	// //go func() {
-	// //	log.Info("run fgprof", "err", http.ListenAndServe(":6060", nil))
-	// //}()
+	// profile name: allocs
+	// profile name: block
+	// profile name: goroutine
+	// profile name: heap
+	// profile name: mutex
+	// profile name: threadcreate
+	//goFile, _ := os.Create("concurrency_goroutine.prof")
+	//goProfile := pprof.Lookup("goroutine")
+	//go goProfile.WriteTo(goFile, 0)
+	//defer goFile.Close()
+
+	//go func() {
+	//	if err := http.ListenAndServe("0.0.0.0:6060", nil); err != nil {
+	//		log.Error("Failure in running pprof server", "err", err)
+	//	}
+	//}()
 
 	// // 内存分析
-	memFile, _ := os.Create("concurrency_mem.prof")
-	defer func() {
-		_ = pprof.WriteHeapProfile(memFile)
-	}()
+	//memFile, _ := os.Create("concurrency_mem.prof")
+	//defer func() {
+	//	_ = pprof.WriteHeapProfile(memFile)
+	//}()
 
 	// Initialize logging
 	logFile1, _ := os.OpenFile("test_socket_many_concurrent_transfer_3400.log", os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
 	logFile2, _ := os.OpenFile("test_socket_many_concurrent_transfer_3401.log", os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
 	//handler := log.NewTerminalHandler(os.Stdout, true)
-	handler1 := log.NewTerminalHandlerWithLevel(logFile1, log.LevelInfo, false)
-	handler2 := log.NewTerminalHandlerWithLevel(logFile2, log.LevelInfo, false)
+	handler1 := log.NewTerminalHandlerWithLevel(logFile1, log.LevelWarn, false)
+	handler2 := log.NewTerminalHandlerWithLevel(logFile2, log.LevelWarn, false)
 	//handler1 := log.NewTerminalHandler(logFile1, false)
 	//handler2 := log.NewTerminalHandler(logFile2, false)
 	logger1 := log.NewLogger(handler1)
@@ -409,17 +421,9 @@ func initiateTransfer(
 	initiatorCid := uint16(100) + i
 	responderCid := uint16(100) + i + 1
 
-	recvCid := &utp.ConnectionId{
-		Send: initiatorCid,
-		Recv: responderCid,
-		Peer: utp.NewUdpPeer(sendAddr),
-	}
+	recvCid := utp.NewConnectionId(utp.NewUdpPeer(sendAddr), responderCid, initiatorCid)
 
-	sendCid := &utp.ConnectionId{
-		Send: responderCid,
-		Recv: initiatorCid,
-		Peer: utp.NewUdpPeer(recvAddr),
-	}
+	sendCid := utp.NewConnectionId(utp.NewUdpPeer(recvAddr), initiatorCid, responderCid)
 
 	// Start receiver goroutine
 	go func() {
@@ -453,8 +457,8 @@ func initiateTransfer(
 			wg.Done()
 		}()
 		stream, err := send.ConnectWithCid(ctx, sendCid, connConfig)
-		require.NotNil(t, stream, "stream should not be nil")
 		assert.NoError(t, err, "connect failed: %w", err)
+		require.NotNil(t, stream, "stream should not be nil")
 		n, err := stream.Write(ctx, data)
 		assert.NoError(t, err, "write failed: %w", err)
 
