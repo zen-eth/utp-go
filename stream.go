@@ -91,7 +91,9 @@ func (s *UtpStream) ReadToEOF(ctx context.Context, buf *[]byte) (int, error) {
 			if !ok {
 				return n, nil
 			}
-			s.logger.Trace("read a new buf", "len", res.Len)
+			if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+				s.logger.Trace("read a new buf", "len", res.Len)
+			}
 			if len(res.Data) == 0 {
 				return n, res.Err
 			}
@@ -108,7 +110,7 @@ func (s *UtpStream) Write(ctx context.Context, buf []byte) (int, error) {
 	}
 	resCh := make(chan *readOrWriteResult, 1)
 	s.writes <- &queuedWrite{buf, 0, resCh}
-	if s.logger.Enabled(s.streamCtx, log.LevelTrace) {
+	if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 		s.logger.Trace("created a new queued write to writes channel",
 			"dst.peer", s.cid.Peer,
 			"buf.len", len(buf),

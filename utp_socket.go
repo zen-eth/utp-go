@@ -18,7 +18,6 @@ const (
 	MAX_UDP_PAYLOAD_SIZE         = math.MaxUint16
 	CidGenerationTryWarningCount = 10
 	AWAITING_CONNECTION_TIMEOUT  = time.Second * 20
-	MaxPacketSize                = 2048
 )
 
 var (
@@ -164,7 +163,9 @@ func (s *UtpSocket) readLoop() {
 			return
 		default:
 			n, from, err := s.socket.ReadFrom(buf)
-			s.logger.Debug("read data from base socket", "n", n, "from", from)
+			if s.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
+				s.logger.Debug("read data from base socket", "n", n, "from", from)
+			}
 			if netutil.IsTemporaryError(err) {
 				// Ignore temporary read errors.
 				s.logger.Error("Temporary UDP read error", "err", err)
@@ -191,14 +192,16 @@ func (s *UtpSocket) writeLoop() {
 		switch event.Type {
 		case outgoing:
 			encoded := event.Packet.Encode()
-			s.logger.Trace("Send a packet out",
-				"s.socketEvents.len", len(s.socketEvents),
-				"target.cid", event.ConnectionId,
-				"packet.type", event.Packet.Header.PacketType.String(),
-				"packet.seqNum", event.Packet.Header.SeqNum,
-				"packet.ackNum", event.Packet.Header.AckNum,
-				"packet.body.len", len(event.Packet.Body),
-				"encoded.len", len(encoded))
+			if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+				s.logger.Trace("Send a packet out",
+					"s.socketEvents.len", len(s.socketEvents),
+					"target.cid", event.ConnectionId,
+					"packet.type", event.Packet.Header.PacketType.String(),
+					"packet.seqNum", event.Packet.Header.SeqNum,
+					"packet.ackNum", event.Packet.Header.AckNum,
+					"packet.body.len", len(event.Packet.Body),
+					"encoded.len", len(encoded))
+			}
 			var peer ConnectionPeer
 			if cid, ok := event.ConnectionId.(*ConnectionId); ok {
 				peer = cid.Peer
@@ -254,14 +257,16 @@ func (s *UtpSocket) handleIncomingBuf(incomingRaw *IncomingPacketRaw) {
 		return
 	}
 
-	s.logger.Trace("receive incoming packet",
-		"s.incomingBuf.len", len(s.incomingBuf),
-		"src.peer", incomingRaw.peer,
-		"packet.type", packetPtr.Header.PacketType.String(),
-		"packet.cid", packetPtr.Header.ConnectionId,
-		"packet.seqNum", packetPtr.Header.SeqNum,
-		"packet.ackNum", packetPtr.Header.AckNum,
-		"packet.Data.len", len(packetPtr.Body))
+	if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+		s.logger.Trace("receive incoming packet",
+			"s.incomingBuf.len", len(s.incomingBuf),
+			"src.peer", incomingRaw.peer,
+			"packet.type", packetPtr.Header.PacketType.String(),
+			"packet.cid", packetPtr.Header.ConnectionId,
+			"packet.seqNum", packetPtr.Header.SeqNum,
+			"packet.ackNum", packetPtr.Header.AckNum,
+			"packet.Data.len", len(packetPtr.Body))
+	}
 
 	// used by syn_pkt init
 	cids := make([]*ConnectionId, 3)
@@ -278,8 +283,6 @@ func (s *UtpSocket) handleIncomingBuf(incomingRaw *IncomingPacketRaw) {
 			return
 		}
 	}
-
-	packetPtr.Body = nil
 
 	s.logger.Trace("received uTP packet for non-existing conn",
 		"cid", packetPtr.Header.ConnectionId,
@@ -318,7 +321,7 @@ func (s *UtpSocket) handleIncomingBuf(incomingRaw *IncomingPacketRaw) {
 		stream := NewUtpStream(s.ctx, s.logger, cid, accept.config, packetPtr, s.socketEvents, newConnStream, connected)
 		go s.awaitConnected(stream, accept, connected)
 	} else {
-		s.logger.Trace("put a new syn packet to incomingConns...")
+		s.logger.Info("put a new syn packet to incomingConns...")
 		s.putIncomingConn(cidHash, &IncomingPacket{pkt: packetPtr, cid: cid})
 	}
 }
@@ -487,7 +490,7 @@ func (s *UtpSocket) AcceptWithCid(ctx context.Context, cid *ConnectionId, config
 		if streamRes == nil {
 			return nil, fmt.Errorf("stream creation failed")
 		}
-		s.logger.Trace("accept success", "cid.Peer", streamRes.stream.cid.Peer, "cid.Send", streamRes.stream.cid.Send, "cid.Recv", streamRes.stream.cid.Recv)
+		s.logger.Info("accept success", "cid.Peer", streamRes.stream.cid.Peer, "cid.Send", streamRes.stream.cid.Send, "cid.Recv", streamRes.stream.cid.Recv)
 		return streamRes.stream, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -603,7 +606,9 @@ func (s *UtpSocket) selectAcceptHelper(
 	connected := make(chan error, 1)
 	streamEvents := make(chan *streamEvent, 1000)
 
-	s.logger.Trace("put a conn stream at selectAcceptHelper", "cid.Peer", cid.Peer, "cid", cid)
+	if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+		s.logger.Trace("put a conn stream at selectAcceptHelper", "cid.Peer", cid.Peer, "cid", cid)
+	}
 	s.putConnStream(cid.Hash(), streamEvents)
 
 	stream := NewUtpStream(
@@ -629,7 +634,9 @@ func (s *UtpSocket) connsStreamLen() int {
 func (s *UtpSocket) removeConnStream(key string) {
 	s.connsMutex.Lock()
 	defer s.connsMutex.Unlock()
-	s.logger.Trace("remove conn stream", "key", key)
+	if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+		s.logger.Trace("remove conn stream", "key", key)
+	}
 	delete(s.conns, key)
 }
 
@@ -643,7 +650,9 @@ func (s *UtpSocket) getConnStream(key string) (chan *streamEvent, bool) {
 func (s *UtpSocket) putConnStream(key string, streamCh chan *streamEvent) {
 	s.connsMutex.Lock()
 	defer s.connsMutex.Unlock()
-	s.logger.Trace("put conn stream", "key", key)
+	if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+		s.logger.Trace("put conn stream", "key", key)
+	}
 	s.conns[key] = streamCh
 }
 
@@ -661,7 +670,9 @@ func (s *UtpSocket) getConnStreamWithCids(cid *ConnectionId, idType IdType) chan
 	s.connsMutex.Lock()
 	defer s.connsMutex.Unlock()
 	if ch, exist := s.conns[cid.Hash()]; exist {
-		s.logger.Debug("get conn stream", "accInitCidKey", cid.Hash(), "accCid.Send", cid.Send, "accCid.Recv", cid.Recv)
+		if s.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
+			s.logger.Debug("get conn stream", "accInitCidKey", cid.Hash(), "accCid.Send", cid.Send, "accCid.Recv", cid.Recv)
+		}
 		return ch
 	}
 

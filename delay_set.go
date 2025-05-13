@@ -24,6 +24,7 @@ type timeWheel[P any] struct {
 	mu               sync.RWMutex
 }
 
+// 0.25s                   8
 func newTimeWheel[P any](interval time.Duration, slotNum int, handleExpireFunc expireFunc[P]) *timeWheel[P] {
 	tw := &timeWheel[P]{
 		stopped:          make(chan struct{}),

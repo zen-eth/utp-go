@@ -74,12 +74,16 @@ func (m *delayMap[P]) remove(key any) {
 		m.lock.Lock()
 		defer m.lock.Unlock()
 	}
-	log.Debug("delay map key count before", "count", len(m.innerMap))
+	if log.Root().Enabled(BASE_CONTEXT, log.LevelDebug) {
+		log.Debug("delay map key count before", "count", len(m.innerMap))
+	}
 	if item, ok := m.innerMap[key]; ok {
 		item.timer.Stop()
 	}
 	delete(m.innerMap, key)
-	log.Debug("delay map key count after", "count", len(m.innerMap))
+	if log.Root().Enabled(BASE_CONTEXT, log.LevelDebug) {
+		log.Debug("delay map key count after", "count", len(m.innerMap))
+	}
 }
 
 func (m *delayMap[P]) keys() []any {

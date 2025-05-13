@@ -2,7 +2,6 @@ package utp_go
 
 import (
 	"errors"
-	bufferpool "github.com/libp2p/go-buffer-pool"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/log"
@@ -18,13 +17,12 @@ var (
 )
 
 type receiveBuffer struct {
-	logger      log.Logger
-	buf         []byte
-	offset      int
-	pending     *btree.BTree
-	initSeqNum  uint16
-	maxReadSize int
-	consumed    uint16
+	logger     log.Logger
+	buf        []byte
+	offset     int
+	pending    *btree.BTree
+	initSeqNum uint16
+	consumed   uint16
 }
 
 type pendingItem struct {
@@ -36,28 +34,41 @@ func (i *pendingItem) Less(other btree.Item) bool {
 	return i.seqNum < other.(*pendingItem).seqNum
 }
 
-func newReceiveBuffer(size int, maxReadSize int, initSeqNum uint16) *receiveBuffer {
-	buf := bufferpool.Get(size)
+func createOrGetPool(size int) *sync.Pool {
+	if pool, exist := bufferPools[size]; exist {
+		return pool
+	}
+	pool := &sync.Pool{
+		New: func() interface{} {
+			return make([]byte, size)
+		},
+	}
+	bufferPools[size] = pool
+	return pool
+}
+
+func newReceiveBuffer(size int, initSeqNum uint16) *receiveBuffer {
+	//buf := createOrGetPool(size).Get().([]byte)
+	buf := make([]byte, size)
 	return &receiveBuffer{
-		buf:         buf,
-		offset:      0,
-		pending:     btree.New(2),
-		initSeqNum:  initSeqNum,
-		maxReadSize: maxReadSize,
-		consumed:    0,
+		buf:        buf,
+		offset:     0,
+		pending:    btree.New(2),
+		initSeqNum: initSeqNum,
+		consumed:   0,
 	}
 }
 
-func newReceiveBufferWithLogger(size int, maxReadSize int, initSeqNum uint16, logger log.Logger) *receiveBuffer {
-	buf := bufferpool.Get(size)
+func newReceiveBufferWithLogger(size int, initSeqNum uint16, logger log.Logger) *receiveBuffer {
+	//buf := createOrGetPool(size).Get().([]byte)
+	buf := make([]byte, size)
 	return &receiveBuffer{
-		logger:      logger,
-		buf:         buf,
-		offset:      0,
-		pending:     btree.New(2),
-		initSeqNum:  initSeqNum,
-		maxReadSize: maxReadSize,
-		consumed:    0,
+		logger:     logger,
+		buf:        buf,
+		offset:     0,
+		pending:    btree.New(2),
+		initSeqNum: initSeqNum,
+		consumed:   0,
 	}
 }
 
@@ -82,7 +93,7 @@ func (rb *receiveBuffer) InitSeqNum() uint16 {
 
 func (rb *receiveBuffer) WasWritten(seqNum uint16) bool {
 	exists := rb.pending.Has(&pendingItem{seqNum: seqNum})
-	if rb.logger != nil {
+	if rb.logger != nil && rb.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 		rb.logger.Trace("checking written", "seqNum", seqNum, "initSeqNum", rb.initSeqNum, "consumed", rb.consumed, "exists", exists)
 	}
 	writtenRange := circularRangeInclusive{start: rb.initSeqNum, end: rb.initSeqNum + rb.consumed}
@@ -90,12 +101,12 @@ func (rb *receiveBuffer) WasWritten(seqNum uint16) bool {
 }
 
 func (rb *receiveBuffer) Read(buf []byte) int {
-	if len(buf) != 0 {
-		buf = buf[:0]
+	if len(buf) == 0 {
+		return 0
 	}
 
-	n := minInt(rb.maxReadSize, rb.offset)
-	buf = append(buf, rb.buf[:n]...)
+	n := minInt(len(buf), rb.offset)
+	copy(buf, rb.buf[:n])
 
 	remaining := rb.offset - n
 	copy(rb.buf, rb.buf[n:n+remaining])
@@ -108,7 +119,9 @@ func (rb *receiveBuffer) Write(data []byte, seqNum uint16) error {
 	if rb.WasWritten(seqNum) {
 		return nil
 	}
-	rb.logger.Trace("will put a data to recv buffer", "seq", seqNum)
+	if rb.logger != nil && rb.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+		rb.logger.Trace("will put a data to recv buffer", "seq", seqNum)
+	}
 	if len(data) > rb.Available() {
 		return errors.New("insufficient space in buffer")
 	}
@@ -117,7 +130,7 @@ func (rb *receiveBuffer) Write(data []byte, seqNum uint16) error {
 
 	//start := rb.initSeqNum + 1
 	next := rb.initSeqNum + 1 + rb.consumed
-	if rb.logger != nil {
+	if rb.logger != nil && rb.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 		rb.logger.Trace("will handle pending data in recv buffer", "startSeq", next)
 	}
 
@@ -134,12 +147,12 @@ func (rb *receiveBuffer) Write(data []byte, seqNum uint16) error {
 		rb.offset = end
 		rb.consumed += 1
 		rb.pending.Delete(pending)
-		if rb.logger != nil {
+		if rb.logger != nil && rb.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 			rb.logger.Trace("will delete a pending data in recv buffer", "seq", next, "pending.len", rb.pending.Len())
 		}
 		next += 1
 	}
-	if rb.logger != nil {
+	if rb.logger != nil && rb.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 		rb.logger.Trace("handled pending data in recv buffer", "endSeq", next)
 	}
 	return nil
@@ -175,7 +188,7 @@ func (rb *receiveBuffer) SelectiveAck() *SelectiveAck {
 		lastAck++
 	}
 
-	if rb.logger != nil {
+	if rb.logger != nil && rb.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 		rb.logger.Trace("will new selective ack", "endSeq", lastAck, "acked.len", len(acked))
 	}
 
@@ -183,5 +196,5 @@ func (rb *receiveBuffer) SelectiveAck() *SelectiveAck {
 }
 
 func (rb *receiveBuffer) close() {
-	bufferpool.Put(rb.buf)
+	createOrGetPool(len(rb.buf)).Put(rb.buf)
 }
