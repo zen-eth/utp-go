@@ -157,7 +157,7 @@ func TestOnPacketInvalidAckNum(t *testing.T) {
 
 	// Setup buffers and state
 	sendBuf := newSendBuffer(TEST_BUFFER_SIZE)
-	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, syn)
+	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, TEST_BUFFER_SIZE, syn)
 
 	conn.state = &ConnState{
 		stateType:   ConnConnected,
@@ -192,7 +192,7 @@ func TestOnFinEstablished(t *testing.T) {
 	sendBuf := newSendBuffer(TEST_BUFFER_SIZE)
 	congestionCtrl := newDefaultController(fromConnConfig(conn.config))
 	sentPackets := newSentPacketsWithoutLogger(synAck, congestionCtrl)
-	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, syn)
+	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, TEST_BUFFER_SIZE, syn)
 
 	// Set connected state
 	conn.state = &ConnState{
@@ -231,7 +231,7 @@ func TestOnFinClosing(t *testing.T) {
 	sendBuf := newSendBuffer(TEST_BUFFER_SIZE)
 	congestionCtrl := newDefaultController(fromConnConfig(conn.config))
 	sentPackets := newSentPacketsWithoutLogger(synAck, congestionCtrl)
-	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, syn)
+	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, TEST_BUFFER_SIZE, syn)
 
 	// Step 3: Set local fin
 	localFin := synAck + 3
@@ -278,7 +278,7 @@ func TestOnFinClosingNonMatchingFin(t *testing.T) {
 	sendBuf := newSendBuffer(TEST_BUFFER_SIZE)
 	congestionCtrl := newDefaultController(fromConnConfig(conn.config))
 	sentPackets := newSentPacketsWithoutLogger(synAck, congestionCtrl)
-	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, syn)
+	recvBuf := newReceiveBuffer(TEST_BUFFER_SIZE, TEST_BUFFER_SIZE, syn)
 
 	// Step 3: Set initial fin
 	fin := syn + 3

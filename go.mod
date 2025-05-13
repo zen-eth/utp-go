@@ -1,6 +1,6 @@
 module github.com/zen-eth/utp-go
 
-go 1.23.1
+go 1.24.2
 
 require (
 	github.com/ethereum/go-ethereum v1.14.11
@@ -16,6 +16,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/google/pprof v0.0.0-20240227163752-401108e1b7e7 // indirect
 	github.com/holiman/uint256 v1.3.1 // indirect
+	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa // indirect
 	golang.org/x/sys v0.28.0 // indirect

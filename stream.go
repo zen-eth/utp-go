@@ -39,9 +39,7 @@ func NewUtpStream(
 	streamEvents chan *streamEvent,
 	connected chan error,
 ) *UtpStream {
-	if logger.Enabled(BASE_CONTEXT, log.LevelInfo) {
-		logger.Info("new a utp stream", "dst.peer", cid.Peer, "dst.send", cid.Send, "dst.recv", cid.Recv)
-	}
+	logger.Trace("new a utp stream", "dst.peer", cid.Peer, "dst.send", cid.Send, "dst.recv", cid.Recv)
 	connHandle := &sync.WaitGroup{}
 	connHandle.Add(1)
 	streamCtx, cancel := context.WithCancel(ctx)
@@ -93,9 +91,7 @@ func (s *UtpStream) ReadToEOF(ctx context.Context, buf *[]byte) (int, error) {
 			if !ok {
 				return n, nil
 			}
-			if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-				s.logger.Trace("read a new buf", "len", res.Len)
-			}
+			s.logger.Trace("read a new buf", "len", res.Len)
 			if len(res.Data) == 0 {
 				return n, res.Err
 			}
@@ -112,7 +108,7 @@ func (s *UtpStream) Write(ctx context.Context, buf []byte) (int, error) {
 	}
 	resCh := make(chan *readOrWriteResult, 1)
 	s.writes <- &queuedWrite{buf, 0, resCh}
-	if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+	if s.logger.Enabled(s.streamCtx, log.LevelTrace) {
 		s.logger.Trace("created a new queued write to writes channel",
 			"dst.peer", s.cid.Peer,
 			"buf.len", len(buf),
@@ -136,9 +132,10 @@ func (s *UtpStream) Write(ctx context.Context, buf []byte) (int, error) {
 }
 
 func (s *UtpStream) Close() {
-	s.logger.Info("call close utp stream", "dst.Peer", s.cid.Peer, "dst.send", s.cid.Send, "dst.recv", s.cid.Recv)
 	s.closeOnce.Do(func() {
+		s.logger.Trace("call close utp stream", "dst.Peer", s.cid.Peer, "dst.send", s.cid.Send, "dst.recv", s.cid.Recv)
 		s.shutdown.Store(true)
+		// wait to consume write buffer and recv buffer
 		s.connHandle.Wait()
 		s.streamCancel()
 	})

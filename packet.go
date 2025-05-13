@@ -290,42 +290,6 @@ func DecodePacket(b []byte) (*packet, error) {
 	p.Eack = ack
 	p.Body = payload
 	return &p, nil
-	//var body []byte
-	//if header.Extension == 0 {
-	//	if receivedBytesLength == MINIMAL_HEADER_SIZE {
-	//		body = []byte{}
-	//	} else {
-	//		body = b[MINIMAL_HEADER_SIZE:]
-	//	}
-	//	p.Header = header
-	//	p.Eack = nil
-	//	p.Body = body
-	//	return &p, nil
-	//}
-	//if receivedBytesLength < MINIMAL_HEADER_SIZE_WITH_SELECTIVE_ACK {
-	//	return nil, ErrPacketTooShort
-	//}
-	//nextExtension := b[20]
-	//extLength := b[21]
-	//
-	//if nextExtension != 0 || extLength != 4 {
-	//	return nil, fmt.Errorf("bad format of selective ack extension: extension=%d, len=%d", nextExtension, extLength)
-	//}
-	//
-	//extension, err := DecodeSelectiveAck(b[22:26])
-	//if err != nil {
-	//	return nil, ErrInvalidSelectiveAckLen
-	//}
-
-	//if receivedBytesLength == MINIMAL_HEADER_SIZE_WITH_SELECTIVE_ACK {
-	//	body = []byte{}
-	//} else {
-	//	body = b[MINIMAL_HEADER_SIZE_WITH_SELECTIVE_ACK:]
-	//}
-	//p.Header = header
-	//p.Eack = extension
-	//p.Body = body
-	//return &p, nil
 }
 
 type ExtensionData struct {

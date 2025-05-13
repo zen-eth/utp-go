@@ -12,6 +12,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"runtime/pprof"
+	"runtime/trace"
 	"sync"
 	"testing"
 	"time"
@@ -23,21 +24,27 @@ import (
 	utp "github.com/zen-eth/utp-go"
 )
 
-var (
+const (
 	test_socket_data_len = 1_000_000
+	numTransfers         = 1000
 )
 
 func TestManyConcurrentTransfers(t *testing.T) {
+	http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
+	go func() {
+		addr := "localhost:6070"
+		log.Info(http.ListenAndServe(addr, nil).Error())
+	}()
 	// // 设置最大线程数为CPU核心数
-	// //runtime.GOMAXPROCS(16)
-	// traceFile, _ := os.Create("concurrency_trace.prof")
-	// _ = trace.Start(traceFile)
-	// defer trace.Stop()
+	//runtime.GOMAXPROCS(8)
+	traceFile, _ := os.Create("concurrency_trace.prof")
+	_ = trace.Start(traceFile)
+	defer trace.Stop()
 
 	// // CPU 分析
-	//cpuFile, _ := os.Create("concurrency_cpu.prof")
-	//_ = pprof.StartCPUProfile(cpuFile)
-	//defer pprof.StopCPUProfile()
+	cpuFile, _ := os.Create("concurrency_cpu.prof")
+	_ = pprof.StartCPUProfile(cpuFile)
+	defer pprof.StopCPUProfile()
 
 	// profile name: allocs
 	// profile name: block
@@ -86,26 +93,27 @@ func TestManyConcurrentTransfers(t *testing.T) {
 	recvAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3400}
 	sendAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3401}
 
+	//recvAddr, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:3400")
+	//sendAddr, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:3401")
+
 	ctx := context.Background()
 	//recv, _, send, _ := buildConnectedPair()
 	// Create sockets
 	//recvLink := utp.WithSocket(ctx, recv, logger1.New("local", ":3400"))
-	recvLink, err := utp.Bind(ctx, "udp", recvAddr, logger1.New("local", ":3400"))
+	recvLink, err := utp.Bind(ctx, "udp4", recvAddr, logger1.New("local", ":3400"))
 	if err != nil {
 		t.Fatalf("Failed to bind recv socket: %v", err)
 	}
 	defer recvLink.Close()
 
 	//sendLink := utp.WithSocket(ctx, send, logger2.New("local", ":3401"))
-	sendLink, err := utp.Bind(ctx, "udp", sendAddr, logger2.New("local", ":3401"))
+	sendLink, err := utp.Bind(ctx, "udp4", sendAddr, logger2.New("local", ":3401"))
 	if err != nil {
 		t.Fatalf("Failed to bind send socket: %v", err)
 	}
 	defer sendLink.Close()
 	// Create wait group for all transfers
 	var wg sync.WaitGroup
-
-	const numTransfers = 1000
 	start := time.Now()
 
 	data := make([]byte, test_socket_data_len)

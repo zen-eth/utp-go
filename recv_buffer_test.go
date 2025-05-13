@@ -13,7 +13,7 @@ const RECV_SIZE = 1024
 
 func TestRecvBufferAvailable(t *testing.T) {
 	initSeqNum := uint16(0xFFFF)
-	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, RECV_SIZE, initSeqNum)
 
 	if buf.Available() != RECV_SIZE {
 		t.Errorf("expected available size to be %d, got %d", RECV_SIZE, buf.Available())
@@ -54,7 +54,7 @@ func TestRecvBufferAvailable(t *testing.T) {
 
 func TestWasWritten(t *testing.T) {
 	initSeqNum := uint16(0xFFFF)
-	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, RECV_SIZE, initSeqNum)
 
 	seqNum := initSeqNum + 2
 	if buf.WasWritten(seqNum) {
@@ -75,7 +75,7 @@ func TestWasWritten(t *testing.T) {
 
 func TestRecvBufferWrite(t *testing.T) {
 	initSeqNum := uint16(0xFFFF)
-	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, RECV_SIZE, initSeqNum)
 
 	const DATA_LEN = 256
 
@@ -112,7 +112,7 @@ func TestRecvBufferWrite(t *testing.T) {
 func TestRecvBufferWriteExceedsAvailable(t *testing.T) {
 
 	initSeqNum := uint16(0xFFFF)
-	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, RECV_SIZE, initSeqNum)
 
 	seqNum := initSeqNum + 1
 	data := make([]byte, RECV_SIZE+1)
@@ -125,7 +125,7 @@ func TestRecvBufferWriteExceedsAvailable(t *testing.T) {
 
 func TestRecvBufferRead(t *testing.T) {
 	initSeqNum := uint16(0xFFFF)
-	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, RECV_SIZE, initSeqNum)
 
 	const DATA_LEN = 256
 
@@ -172,7 +172,7 @@ func TestRecvBufferRead(t *testing.T) {
 
 func TestAckNum(t *testing.T) {
 	initSeqNum := uint16(0xFFFF)
-	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, RECV_SIZE, initSeqNum)
 
 	if buf.AckNum() != initSeqNum {
 		t.Errorf("expected ackNum to be %d, got %d", initSeqNum, buf.AckNum())
@@ -205,7 +205,7 @@ func TestAckNum(t *testing.T) {
 
 func TestSelectiveAck(t *testing.T) {
 	initSeqNum := uint16(0xFFFF)
-	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, RECV_SIZE, initSeqNum)
 
 	selectiveAck := buf.SelectiveAck()
 	if selectiveAck != nil {
@@ -241,7 +241,7 @@ func TestSelectiveAck(t *testing.T) {
 
 func TestSelectiveACKOverflow(t *testing.T) {
 	initSeqNum := uint16(math.MaxUint16) - 2
-	buf := newReceiveBuffer(RECV_SIZE, initSeqNum)
+	buf := newReceiveBuffer(RECV_SIZE, RECV_SIZE, initSeqNum)
 
 	// 初始时无选择性ACK
 	nilSelectiveAck := buf.SelectiveAck()
@@ -253,7 +253,7 @@ func TestSelectiveACKOverflow(t *testing.T) {
 	}
 
 	// 写入乱序包（注意Go中uint16自动处理溢出）
-	seqNum := uint16(initSeqNum + 2) // 65533 + 2 = 65535 (overflow)
+	seqNum := initSeqNum + 2 // 65533 + 2 = 65535 (overflow)
 	buf.Write(data, seqNum)
 
 	seqNum = initSeqNum + 3 // 65533 + 3 = 0 (overflow)

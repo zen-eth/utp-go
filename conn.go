@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/log"
+	bufferpool "github.com/libp2p/go-buffer-pool"
 )
 
 const (
@@ -34,6 +35,10 @@ var (
 	ErrReset             = errors.New("reset")
 	ErrSynFromAcceptor   = errors.New("syn from acceptor")
 	ErrTimedOut          = errors.New("timed out")
+)
+
+var (
+	emptyBuffer = make([]byte, 0)
 )
 
 type EndpointType int
@@ -70,7 +75,7 @@ func NewConnState(connected chan error) *ConnState {
 }
 
 type ConnectionConfig struct {
-	MaxPacketSize   uint16
+	MaxPacketSize   int
 	MaxConnAttempts int
 	MaxIdleTimeout  time.Duration
 	InitialTimeout  time.Duration
@@ -131,12 +136,14 @@ type connection struct {
 	unacked          *timeWheel[*packet]
 	unackTimeoutCh   chan *packet
 	handleExpiration expireFunc[*packet]
-	reads            chan *readOrWriteResult
-	readable         chan struct{}
-	pendingWrites    []*queuedWrite
-	writable         chan struct{}
-	latestTimeout    *time.Time
-	synState         *packet
+
+	reads    chan *readOrWriteResult
+	readable chan struct{}
+
+	pendingWrites []*queuedWrite
+	writable      chan struct{}
+	latestTimeout *time.Time
+	synState      *packet
 }
 
 func newConnection(
@@ -202,18 +209,13 @@ func newConnection(
 
 func (c *connection) eventLoop(stream *UtpStream) error {
 	defer c.unacked.stop()
-	if c.logger.Enabled(BASE_CONTEXT, log.LevelInfo) {
-		c.logger.Info("uTP conn starting", "dst.peer", c.cid.Peer, "cid.Send", c.cid.Send, "cid.Recv", c.cid.Recv)
-	}
-
+	c.logger.Trace("uTP conn starting", "dst.peer", c.cid.Peer, "cid.Send", c.cid.Send, "cid.Recv", c.cid.Recv)
 	// Initialize connection based on endpoint type
 	if c.endpoint.Type == Initiator {
 		synSeqNum := c.endpoint.SynNum
 		synPkt := c.synPacket(synSeqNum)
 		c.socketEvents <- newOutgoingSocketEvent(synPkt, c.cid)
-		if c.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
-			c.logger.Debug("put a initial syn packet to delay map", "socketEvents.len", len(c.socketEvents), "dst.peer", c.cid.Peer, "synSeqNum", synSeqNum)
-		}
+		c.logger.Debug("put a initial syn packet to delay map", "socketEvents.len", len(c.socketEvents), "dst.peer", c.cid.Peer, "synSeqNum", synSeqNum)
 		c.unacked.put(synSeqNum, synPkt, c.config.InitialTimeout)
 
 		c.endpoint.Attempts = 1
@@ -224,12 +226,10 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 
 		c.synState = c.statePacket()
 
-		if c.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
-			c.logger.Debug("a initial state packet", "peer", c.cid.Peer, "cid.Send", c.cid.Send, "cid.Recv", c.cid.Recv)
-		}
+		c.logger.Debug("a initial state packet", "peer", c.cid.Peer, "cid.Send", c.cid.Send, "cid.Recv", c.cid.Recv)
 		c.socketEvents <- newOutgoingSocketEvent(c.synState, c.cid)
 
-		recvBuf := newReceiveBufferWithLogger(c.config.BufferSize, syn, c.logger)
+		recvBuf := newReceiveBufferWithLogger(c.config.BufferSize, c.config.MaxPacketSize, syn, c.logger)
 		sendBuf := newSendBuffer(c.config.BufferSize)
 		congestionCtrl := newDefaultController(fromConnConfig(c.config))
 		sentPacketsHolder := newSentPackets(synAck-1, congestionCtrl, c.logger) // wrapping subtraction
@@ -253,15 +253,13 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 	defer idleTimer.Stop()
 	handleIncoming := func(event *streamEvent) {
 		if event.Type == streamIncoming {
-			if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-				c.logger.Trace("incoming packet",
-					"stream.streamEvents.len", len(stream.streamEvents),
-					"src.peer", c.cid.Peer,
-					"packet.type", event.Packet.Header.PacketType.String(),
-					"packet.seqNum", event.Packet.Header.SeqNum,
-					"packet.ackNum", event.Packet.Header.AckNum,
-					"buf.len", len(event.Packet.Body))
-			}
+			c.logger.Trace("incoming packet",
+				"stream.streamEvents.len", len(stream.streamEvents),
+				"src.peer", c.cid.Peer,
+				"packet.type", event.Packet.Header.PacketType.String(),
+				"packet.seqNum", event.Packet.Header.SeqNum,
+				"packet.ackNum", event.Packet.Header.AckNum,
+				"buf.len", len(event.Packet.Body))
 			// reset idle timeout
 			resetIdleTimer()
 			c.onPacket(event.Packet, time.Now())
@@ -271,40 +269,23 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 	}
 
 	handleWrites := func(write *queuedWrite, ok bool) {
-		if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-			c.logger.Trace("get queued write from writes", "dst.peer", c.cid.Peer, "content", len(write.data))
-		}
+		c.logger.Trace("get queued write from writes", "dst.peer", c.cid.Peer, "content", len(write.data))
 		resetIdleTimer()
 		c.onWrite(write)
 	}
 
-	handleReadable := func() {
-		c.processReads()
-	}
-
-	handleWritable := func() {
-		currentTime := time.Now()
-		c.logger.Trace("has data to continually writing start")
-		c.processWrites(currentTime)
-		if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-			c.logger.Trace("has data to continually writing end...", "c.writable.len", len(c.writable), "duration", time.Since(currentTime))
-		}
-	}
-
 	handleTimeout := func(timeoutPkt *packet) {
-		if c.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
-			c.logger.Debug("unack timeout",
-				"seq", timeoutPkt.Header.SeqNum,
-				"ack", timeoutPkt.Header.AckNum,
-				"item.key", timeoutPkt.Header.SeqNum,
-				"type", timeoutPkt.Header.PacketType)
-		}
+		c.logger.Debug("unack timeout",
+			"seq", timeoutPkt.Header.SeqNum,
+			"ack", timeoutPkt.Header.AckNum,
+			"item.key", timeoutPkt.Header.SeqNum,
+			"type", timeoutPkt.Header.PacketType.String())
 		c.onTimeout(timeoutPkt, time.Now())
 	}
 
 	handleIdleTimeout := func() {
 		if c.state.stateType != ConnClosed {
-			c.logger.Warn("idle timeout, closing...")
+			c.logger.Trace("idle timeout, closing...")
 			c.state.stateType = ConnClosed
 			c.state.Err = ErrTimedOut
 		}
@@ -312,7 +293,7 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 
 	handleCtxDone := func() {
 		if !stream.shutdown.Load() {
-			c.logger.Info("ctx done, uTP conn initiating shutdown...", "err", c.ctx.Err())
+			c.logger.Trace("ctx done, uTP conn initiating shutdown...", "err", c.ctx.Err())
 			stream.shutdown.Store(true)
 		}
 	}
@@ -320,13 +301,11 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 	var maxStreamEventLen int
 	for {
 		maxStreamEventLen = max(maxStreamEventLen, len(stream.streamEvents))
-		if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-			c.logger.Trace("connection event count",
-				"maxStreamEventLen", maxStreamEventLen,
-				"streamEvents.len", len(stream.streamEvents),
-				"readable.len", len(c.readable),
-				"writeable.len", len(c.writable))
-		}
+		c.logger.Trace("connection event count",
+			"maxStreamEventLen", maxStreamEventLen,
+			"streamEvents.len", len(stream.streamEvents),
+			"readable.len", len(c.readable),
+			"writeable.len", len(c.writable))
 		select {
 		case event := <-stream.streamEvents:
 			handleIncoming(event)
@@ -341,10 +320,10 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 			handleWrites(write, ok)
 			goto afterSelect
 		case <-c.readable:
-			handleReadable()
+			c.processReads()
 			goto afterSelect
 		case <-c.writable:
-			handleWritable()
+			c.processWrites(time.Now())
 			goto afterSelect
 		default:
 		}
@@ -354,16 +333,16 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 		case write, ok := <-stream.writes:
 			handleWrites(write, ok)
 		case <-c.readable:
-			handleReadable()
+			c.processReads()
 		case <-c.writable:
-			handleWritable()
+			c.processWrites(time.Now())
 		case timeoutPkt := <-c.unackTimeoutCh:
 			handleTimeout(timeoutPkt)
 		case <-idleTimer.C:
 			handleIdleTimeout()
 		case <-c.ctx.Done():
 			handleCtxDone()
-			c.logger.Error("stream context done, will force stop...", "c.cid.peer", c.cid.Peer, "c.cid.Send", c.cid.Send, "c.cid.Recv", c.cid.Recv)
+			c.logger.Trace("stream context done, will force stop...", "c.cid.peer", c.cid.Peer, "c.cid.Send", c.cid.Send, "c.cid.Recv", c.cid.Recv)
 			return c.ctx.Err()
 		}
 	afterSelect:
@@ -372,8 +351,10 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 		}
 
 		if c.state.stateType == ConnClosed {
-			c.logger.Info("uTP conn closing...", "err", c.state.Err, "c.cid.Send", c.cid.Send, "c.cid.Recv", c.cid.Recv)
-			c.processReads()
+			c.logger.Trace("uTP conn closing...", "err", c.state.Err, "c.cid.Send", c.cid.Send, "c.cid.Recv", c.cid.Recv)
+			if !c.eof() {
+				c.processReads()
+			}
 			c.processWrites(time.Now())
 			if c.state.RecvBuf != nil {
 				c.state.RecvBuf.close()
@@ -410,7 +391,7 @@ func (c *connection) shutdown() {
 				).WithAckNum(ackNum).WithSelectiveAck(selectiveAck).Build()
 
 				c.state.closing.LocalFin = &seqNum
-				c.logger.Info("transmitting FIN", "dst.Peer", c.cid.Peer, "dst.Send", c.cid.Send, "dst.Recv", c.cid.Recv, "seq", seqNum)
+				c.logger.Trace("transmitting FIN", "dst.Peer", c.cid.Peer, "dst.Send", c.cid.Send, "dst.Recv", c.cid.Recv, "seq", seqNum)
 				c.transmit(fin, time.Now())
 			}
 		} else {
@@ -432,11 +413,10 @@ func (c *connection) shutdown() {
 					Build()
 
 				localFin = &seqNum
-
-				c.logger.Info("transmitting FIN", "dst.Peer", c.cid.Peer, "dst.Send", c.cid.Send, "dst.Recv", c.cid.Recv, "seq", seqNum)
+				c.logger.Trace("transmitting FIN", "dst.Peer", c.cid.Peer, "dst.Send", c.cid.Send, "dst.Recv", c.cid.Recv, "seq", seqNum)
 				c.transmit(fin, time.Now())
 			}
-			c.logger.Info("init closingRecord", "dst.peer", c.cid.Peer, "dst.send", c.cid.Send, "dst.recv", c.cid.Recv, "localFin", localFin)
+			c.logger.Trace("init localFin of closingRecord", "dst.peer", c.cid.Peer, "dst.send", c.cid.Send, "dst.recv", c.cid.Recv, "localFin", localFin)
 			c.state.closing = &ClosingRecord{
 				LocalFin:  localFin,
 				RemoteFin: nil,
@@ -450,7 +430,7 @@ func (c *connection) processWrites(now time.Time) {
 	case ConnConnecting:
 		return
 	case ConnClosed:
-		c.logger.Warn("connection is closed, will not process writing",
+		c.logger.Trace("connection is closed, will not process pending writes",
 			"c.cid.send", c.cid.Send, "c.cid.recv", c.cid.Recv)
 		result := &readOrWriteResult{
 			Err: c.state.Err,
@@ -467,9 +447,7 @@ func (c *connection) processWrites(now time.Time) {
 	var payloads [][]byte
 
 	for windowSize > 0 {
-		if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-			c.logger.Trace("has window size to send a packet data in sendBuffer", "windowSize", windowSize)
-		}
+		c.logger.Trace("has window size to send a packet data in sendBuffer", "windowSize", windowSize)
 		maxDataSize := minUint32(windowSize, uint32(c.config.MaxPacketSize-64))
 		data := make([]byte, maxDataSize)
 		n := c.state.SendBuf.Read(data)
@@ -480,7 +458,7 @@ func (c *connection) processWrites(now time.Time) {
 		windowSize -= uint32(n)
 	}
 
-	for windowSize == 0 && len(c.writable) > 2 {
+	for windowSize == 0 && len(c.writable) > 10 {
 		<-c.writable
 	}
 	// Write pending data to send buffer
@@ -531,17 +509,13 @@ func (c *connection) processWrites(now time.Time) {
 }
 
 func (c *connection) onWrite(writeReq *queuedWrite) {
-	writeReq.written = 0
 	switch c.state.stateType {
 	case ConnConnecting:
 		// There are 0 bytes written so far
 		c.pendingWrites = append(c.pendingWrites, writeReq)
-
 	case ConnConnected:
 		if c.state.closing != nil {
-			if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-				c.logger.Trace("append a queuedWrite to pending writes when closing the conn...")
-			}
+			c.logger.Trace("append a queuedWrite to pending writes when closing the conn...")
 			if c.state.closing.LocalFin == nil && c.state.closing.RemoteFin != nil {
 				c.pendingWrites = append(c.pendingWrites, writeReq)
 			} else {
@@ -581,24 +555,25 @@ func (c *connection) processReads() {
 	}
 
 	currentTime := time.Now()
-	if recvBuf != nil && c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+	if recvBuf != nil && c.logger.Enabled(c.ctx, log.LevelTrace) {
 		c.logger.Trace("read data saving in the recvBuf, start...", "available", recvBuf.Available(), "isEmpty", recvBuf.IsEmpty())
 	}
 	for recvBuf != nil && !recvBuf.IsEmpty() {
-		buf := make([]byte, c.config.MaxPacketSize)
+		buf := bufferpool.Get(c.config.MaxPacketSize)
 		n := recvBuf.Read(buf)
 		if n == 0 {
+			bufferpool.Put(buf)
 			break
 		}
 		c.reads <- &readOrWriteResult{Data: buf, Len: n}
 	}
-	if recvBuf != nil && c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+	if recvBuf != nil && c.logger.Enabled(c.ctx, log.LevelTrace) {
 		c.logger.Trace("read data saving in the recvBuf, end...", "duration", currentTime, "available", recvBuf.Available(), "isEmpty", recvBuf.IsEmpty())
 	}
 
 	// If we have reached eof, send an empty resultCh to all pending reads
 	if c.eof() {
-		c.reads <- &readOrWriteResult{Data: make([]byte, 0)}
+		c.reads <- &readOrWriteResult{Data: emptyBuffer}
 	}
 }
 
@@ -682,29 +657,26 @@ func (c *connection) onTimeout(packet *packet, now time.Time) {
 		nowMicros := time.Now().UnixMicro()
 		tsDiffMicros := uint32(c.peerTsDiff.Microseconds())
 
-		newPacket := NewPacketBuilder(packet.Header.PacketType, packet.Header.ConnectionId, uint32(nowMicros), recvWindow, packet.Header.SeqNum).
-			WithAckNum(c.state.RecvBuf.AckNum()).
-			WithSelectiveAck(c.state.RecvBuf.SelectiveAck()).
-			WithTsDiffMicros(tsDiffMicros).
-			WithPayload(packet.Body).
-			Build()
+		packet.Header.WndSize = recvWindow
+		packet.Header.Timestamp = nowMicros & 0xFFFF
+		packet.Header.TimestampDiff = tsDiffMicros
+		packet.Header.AckNum = c.state.RecvBuf.AckNum()
+		packet.Eack = c.state.RecvBuf.SelectiveAck()
 
-		c.transmit(newPacket, now)
+		c.transmit(packet, now)
 	default:
 	}
 }
 
 func (c *connection) onPacket(packet *packet, now time.Time) {
-	if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-		c.logger.Trace("on packet start...",
-			"packet.body.len", len(packet.Body),
-			"packet.type", packet.Header.PacketType.String(),
-			"packet.cid", packet.Header.ConnectionId,
-			"packet.seqnum", packet.Header.SeqNum,
-			"packet.acknum", packet.Header.AckNum,
-			"packet.windowSize", packet.Header.WndSize,
-			"now", now)
-	}
+	c.logger.Trace("on packet start...",
+		"packet.body.len", len(packet.Body),
+		"packet.type", packet.Header.PacketType.String(),
+		"packet.cid", packet.Header.ConnectionId,
+		"packet.seqnum", packet.Header.SeqNum,
+		"packet.acknum", packet.Header.AckNum,
+		"packet.windowSize", packet.Header.WndSize,
+		"now", now)
 	nowMicros := time.Now().UnixMicro()
 	c.peerRecvWindow = packet.Header.WndSize
 
@@ -739,13 +711,11 @@ func (c *connection) onPacket(packet *packet, now time.Time) {
 	case st_state, st_data, st_fin:
 		delay := time.Duration(packet.Header.TimestampDiff) * time.Microsecond
 		if err = c.processAck(packet.Header.AckNum, packet.Eack, delay, now); err != nil {
-			if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-				c.logger.Trace("ack does not correspond to known seq_num",
-					"packet.type", packet.Header.PacketType,
-					"packet.seqNum", packet.Header.SeqNum,
-					"packet.ackNum", packet.Header.AckNum,
-					"err", err)
-			}
+			c.logger.Trace("ack does not correspond to known seq_num",
+				"packet.type", packet.Header.PacketType,
+				"packet.seqNum", packet.Header.SeqNum,
+				"packet.ackNum", packet.Header.AckNum,
+				"err", err)
 		}
 	default:
 	}
@@ -768,12 +738,10 @@ func (c *connection) onPacket(packet *packet, now time.Time) {
 
 	case st_data, st_fin:
 		if statePacket := c.statePacket(); statePacket != nil {
-			if c.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
-				c.logger.Debug("create a state packet to send out",
-					"packet.seqNum", statePacket.Header.SeqNum,
-					"packet.ackNum", statePacket.Header.AckNum,
-					"packet.cid", statePacket.Header.ConnectionId)
-			}
+			c.logger.Debug("create a state packet to send out",
+				"packet.seqNum", statePacket.Header.SeqNum,
+				"packet.ackNum", statePacket.Header.AckNum,
+				"packet.cid", statePacket.Header.ConnectionId)
 
 			c.socketEvents <- newOutgoingSocketEvent(statePacket, c.cid)
 		}
@@ -791,9 +759,7 @@ func (c *connection) onPacket(packet *packet, now time.Time) {
 
 	// Handle connection closing cases
 	if c.state.stateType == ConnConnected && c.state.closing != nil && c.state.closing.LocalFin != nil {
-		if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-			c.logger.Trace("try close connection locally...", "dst.Peer", c.cid.Peer, "dst.Send", c.cid.Send, "dst.Recv", c.cid.Recv)
-		}
+		c.logger.Trace("try close connection locally...", "dst.Peer", c.cid.Peer, "dst.Send", c.cid.Send, "dst.Recv", c.cid.Recv)
 		lastAckNum, isNone := c.state.SentPackets.LastAckNum()
 		if !isNone && lastAckNum == *c.state.closing.LocalFin {
 			c.state.stateType = ConnClosed
@@ -802,9 +768,7 @@ func (c *connection) onPacket(packet *packet, now time.Time) {
 	}
 
 	if c.state.stateType == ConnConnected && c.state.closing != nil && c.state.closing.RemoteFin != nil {
-		if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-			c.logger.Trace("close connection remotely...", "dst.Peer", c.cid.Peer, "dst.Send", c.cid.Send, "dst.Recv", c.cid.Recv)
-		}
+		c.logger.Trace("close connection remotely...", "dst.Peer", c.cid.Peer, "dst.Send", c.cid.Send, "dst.Recv", c.cid.Recv)
 		if !c.state.SentPackets.HasUnackedPackets() && c.state.RecvBuf.AckNum() == *c.state.closing.RemoteFin {
 			c.processReads()
 			c.state.stateType = ConnClosed
@@ -832,40 +796,34 @@ func (c *connection) processAck(
 		ackNum, selectiveAck, delay, now)
 	if err != nil {
 		seqRange := c.state.SentPackets.SeqNumRange()
-		if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-			c.logger.Trace("sent packets onAck has error",
-				"err", err,
-				"cid.send", c.cid.Send,
-				"cid.recv", c.cid.Recv,
-				"ackNum", ackNum,
-				"seqStart",
-				seqRange.start,
-				"seqEnd", seqRange.end)
-		}
+		c.logger.Trace("sent packets onAck has error",
+			"err", err,
+			"cid.send", c.cid.Send,
+			"cid.recv", c.cid.Recv,
+			"ackNum", ackNum,
+			"seqStart",
+			seqRange.start,
+			"seqEnd", seqRange.end)
 		if errors.Is(err, ErrInvalidAckNum) {
 			c.reset(err)
 			return err
 		}
 		return err
 	}
-	if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-		c.logger.Trace("process ack",
-			"cid.send", c.cid.Send,
-			"cid.recv", c.cid.Recv,
-			"fullAcked.start", fullAcked.start,
-			"fullAcked.end", fullAcked.end)
-	}
+	c.logger.Trace("process ack",
+		"cid.send", c.cid.Send,
+		"cid.recv", c.cid.Recv,
+		"fullAcked.start", fullAcked.start,
+		"fullAcked.end", fullAcked.end)
 	c.unacked.retain(func(key any) bool {
 		// return true to remove
 		return fullAcked.Contains(key.(uint16))
 	})
 	for _, selectedAck := range selectedAcks {
-		if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-			c.logger.Trace("process ack, will remove acked num from innerMap",
-				"cid.send", c.cid.Send,
-				"cid.recv", c.cid.Recv,
-				"ackNum", selectedAck)
-		}
+		c.logger.Trace("process ack, will remove acked num from innerMap",
+			"cid.send", c.cid.Send,
+			"cid.recv", c.cid.Recv,
+			"ackNum", selectedAck)
 		c.unacked.remove(selectedAck)
 	}
 
@@ -902,9 +860,9 @@ func (c *connection) onState(seqNum, ackNum uint16) {
 		// NOTE: In a deviation from the specification, we initialize the ACK num
 		// to the sequence number of the SYN-ACK minus 1. This is consistent with
 		// the reference implementation and the libtorrent implementation.
-		c.logger.Info("connect success, will initial connection state...",
+		c.logger.Trace("connect success, will initial connection state...",
 			"cid.send", c.cid.Send, "cid.recv", c.cid.Recv)
-		recvBuf := newReceiveBufferWithLogger(c.config.BufferSize, seqNum-1, c.logger) // wrapping subtraction for uint16
+		recvBuf := newReceiveBufferWithLogger(c.config.BufferSize, c.config.MaxPacketSize, seqNum-1, c.logger) // wrapping subtraction for uint16
 		sendBuf := newSendBuffer(c.config.BufferSize)
 
 		congestionCtrl := newDefaultController(fromConnConfig(c.config))
@@ -919,9 +877,7 @@ func (c *connection) onState(seqNum, ackNum uint16) {
 }
 
 func (c *connection) onData(seqNum uint16, data []byte) error {
-	if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-		c.logger.Trace("on data packet", "seqNum", seqNum, "data.len", len(data))
-	}
+	c.logger.Trace("on data packet", "seqNum", seqNum, "data.len", len(data))
 	// If the data payload is empty, then reset the connection
 	if len(data) == 0 {
 		c.reset(ErrEmptyDataPayload)
@@ -933,14 +889,14 @@ func (c *connection) onData(seqNum uint16, data []byte) error {
 			return errors.New("unreachable: connection should be marked established")
 		} else {
 			// connection being established.
-			c.logger.Info("connection being established, ignore", "src.peer", c.cid.Peer, "seqNum", seqNum)
+			c.logger.Trace("connection being established, ignore", "src.peer", c.cid.Peer, "seqNum", seqNum)
 			return nil
 		}
 
 	case ConnConnected:
 		if c.state.closing != nil && c.state.closing.RemoteFin != nil {
 			// connection is closing
-			c.logger.Info("connection has received remote FIN", "src.peer", c.cid.Peer, "seqNum", seqNum)
+			c.logger.Trace("connection has received remote FIN", "src.peer", c.cid.Peer, "seqNum", seqNum)
 			start := c.state.RecvBuf.InitSeqNum()
 			seqRange := newCircularRangeInclusive(start, *c.state.closing.RemoteFin)
 			if !seqRange.Contains(seqNum) {
@@ -956,14 +912,12 @@ func (c *connection) onData(seqNum uint16, data []byte) error {
 				c.logger.Warn("write data to recv buffer, but available space is not enough",
 					"src.peer", c.cid.Peer, "seqNum", seqNum, "data.len", len(data))
 			}
-			if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-				c.logger.Trace("write data to recv buffer",
-					"src.peer", c.cid.Peer, "seqNum", seqNum, "data.len", len(data), "nextAckNum", c.state.RecvBuf.AckNum())
-			}
+			c.logger.Trace("write data to recv buffer",
+				"src.peer", c.cid.Peer, "seqNum", seqNum, "data.len", len(data), "nextAckNum", c.state.RecvBuf.AckNum())
 			return err
 		}
+
 	default:
-		// do nothing
 	}
 	return nil
 }
@@ -972,8 +926,8 @@ func (c *connection) onFin(seqNum uint16, data []byte) error {
 	switch c.state.stateType {
 	case ConnConnecting, ConnClosed:
 		return nil
-
 	case ConnConnected:
+		c.logger.Trace("received FIN", "seq", seqNum, "c.cid.send", c.cid.Send, "c.cid.recv", c.cid.Recv)
 		if c.state.closing != nil {
 			if c.state.closing.RemoteFin != nil {
 				// If we have already received a FIN, a subsequent FIN with a different
@@ -982,7 +936,6 @@ func (c *connection) onFin(seqNum uint16, data []byte) error {
 					c.reset(ErrInvalidFin)
 				}
 			} else {
-				c.logger.Warn("received FIN", "seq", seqNum, "c.cid.send", c.cid.Send, "c.cid.recv", c.cid.Recv)
 				remoteFin := seqNum
 				c.state.closing.RemoteFin = &remoteFin
 				return c.state.RecvBuf.Write(data, seqNum)
@@ -992,8 +945,6 @@ func (c *connection) onFin(seqNum uint16, data []byte) error {
 			if err := c.state.RecvBuf.Write(data, seqNum); err != nil {
 				return err
 			}
-			c.logger.Warn("received FIN", "seq", seqNum, "c.cid.send", c.cid.Send, "c.cid.recv", c.cid.Recv)
-
 			c.state.closing = &ClosingRecord{
 				LocalFin:  nil,
 				RemoteFin: &seqNum,
@@ -1104,14 +1055,12 @@ func (c *connection) retransmitLostPackets(now time.Time) {
 			WithAckNum(c.state.RecvBuf.AckNum()).
 			WithSelectiveAck(c.state.RecvBuf.SelectiveAck()).
 			Build()
-		if c.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
-			c.logger.Debug("will retransmit lost packet",
-				"packet.type", packetInst.Header.PacketType,
-				"packet.seqNum", packetInst.Header.SeqNum,
-				"packet.ackNum", packetInst.Header.AckNum,
-				"packet.cid", packetInst.Header.ConnectionId,
-				"packet.data.len", len(payload))
-		}
+		c.logger.Debug("will retransmit lost packet",
+			"packet.type", packetInst.Header.PacketType,
+			"packet.seqNum", packetInst.Header.SeqNum,
+			"packet.ackNum", packetInst.Header.AckNum,
+			"packet.cid", packetInst.Header.ConnectionId,
+			"packet.data.len", len(payload))
 		c.transmit(packetInst, now)
 	}
 }
@@ -1125,15 +1074,13 @@ func (c *connection) transmit(packet *packet, now time.Time) {
 		length = uint32(len(packet.Body))
 	}
 
-	if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-		c.logger.Trace("will transmit packet",
-			"cid", packet.Header.ConnectionId,
-			"packet.type", packet.Header.PacketType.String(),
-			"packet.seqNum", packet.Header.SeqNum,
-			"packet.ackNum", packet.Header.AckNum,
-			"innerMap.key", packet.Header.SeqNum,
-			"packet.body.len", len(packet.Body))
-	}
+	c.logger.Trace("will transmit packet",
+		"cid", packet.Header.ConnectionId,
+		"packet.type", packet.Header.PacketType.String(),
+		"packet.seqNum", packet.Header.SeqNum,
+		"packet.ackNum", packet.Header.AckNum,
+		"innerMap.key", packet.Header.SeqNum,
+		"packet.body.len", len(packet.Body))
 
 	c.state.SentPackets.OnTransmit(packet.Header.SeqNum, packet.Header.PacketType, payload, length, now)
 	c.unacked.put(packet.Header.SeqNum, packet, c.state.SentPackets.Timeout())

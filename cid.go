@@ -85,5 +85,5 @@ func (id *ConnectionId) Hash() string {
 }
 
 func (id *ConnectionId) String() string {
-	return fmt.Sprintf("send_id: %d recv_id:%d peer:%v", id.Send, id.Recv, id.Peer)
+	return fmt.Sprintf("send_id: %d recv_id:%d peer:%v hash: %s", id.Send, id.Recv, id.Peer, id.hash)
 }
