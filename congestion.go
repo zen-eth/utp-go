@@ -10,7 +10,7 @@ import (
 
 const (
 	defaultTargetMicros       = 100000 * time.Microsecond
-	defaultInitialTimeout     = time.Second
+	defaultInitialTimeout     = 4 * time.Second
 	defaultMinTimeout         = 500 * time.Millisecond
 	defaultMaxTimeout         = 60 * time.Second
 	defaultMaxPacketSizeBytes = 1024
