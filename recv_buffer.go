@@ -2,18 +2,12 @@ package utp_go
 
 import (
 	"errors"
-	"sync"
-
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/google/btree"
 )
 
 const (
 	MAX_SELECTIVE_ACK_COUNT int = 32 * 63
-)
-
-var (
-	bufferPools = make(map[int]*sync.Pool)
 )
 
 type receiveBuffer struct {
@@ -34,21 +28,7 @@ func (i *pendingItem) Less(other btree.Item) bool {
 	return i.seqNum < other.(*pendingItem).seqNum
 }
 
-func createOrGetPool(size int) *sync.Pool {
-	if pool, exist := bufferPools[size]; exist {
-		return pool
-	}
-	pool := &sync.Pool{
-		New: func() interface{} {
-			return make([]byte, size)
-		},
-	}
-	bufferPools[size] = pool
-	return pool
-}
-
 func newReceiveBuffer(size int, initSeqNum uint16) *receiveBuffer {
-	//buf := createOrGetPool(size).Get().([]byte)
 	buf := make([]byte, size)
 	return &receiveBuffer{
 		buf:        buf,
@@ -60,7 +40,6 @@ func newReceiveBuffer(size int, initSeqNum uint16) *receiveBuffer {
 }
 
 func newReceiveBufferWithLogger(size int, initSeqNum uint16, logger log.Logger) *receiveBuffer {
-	//buf := createOrGetPool(size).Get().([]byte)
 	buf := make([]byte, size)
 	return &receiveBuffer{
 		logger:     logger,
@@ -196,5 +175,4 @@ func (rb *receiveBuffer) SelectiveAck() *SelectiveAck {
 }
 
 func (rb *receiveBuffer) close() {
-	createOrGetPool(len(rb.buf)).Put(rb.buf)
 }
