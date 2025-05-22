@@ -277,3 +277,45 @@ func TestSelectiveACKOverflow(t *testing.T) {
 	require.True(t, reflect.DeepEqual(notNilSelectiveAck.Acked(), expected),
 		"Expected acked %v, got %v", expected, notNilSelectiveAck.Acked())
 }
+
+func BenchmarkReceiveBufferWrite_OutOfOrder(b *testing.B) {
+	const (
+		bufferSize   = 1024 * 1024 // 1MB
+		numPackets   = 1000
+		packetSize   = 100
+		initialSeqNu = uint16(10000)
+	)
+
+	packetData := make([]byte, packetSize)
+	for i := 0; i < packetSize; i++ {
+		packetData[i] = byte(i % 256)
+	}
+
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		// Setup for each b.N iteration (outside timer)
+		rb := newReceiveBuffer(bufferSize, initialSeqNu)
+
+		// Generate packets in reverse order for out-of-order scenario
+		seqNumbers := make([]uint16, numPackets)
+		for j := 0; j < numPackets; j++ {
+			seqNumbers[j] = initialSeqNu + uint16(numPackets-j) // Reverse order
+		}
+
+		b.ResetTimer() // Start timer for the actual benchmarked code
+
+		for j := 0; j < numPackets; j++ {
+			err := rb.Write(packetData, seqNumbers[j])
+			if err != nil {
+				// In a real benchmark, you might want to b.Fatal or b.Error
+				// For this example, we'll assume writes should succeed if buffer is large enough
+				// and sequence numbers are within reasonable range of initSeqNum + buffer capacity in terms of packets
+			}
+		}
+		b.StopTimer() // Stop timer if there was any teardown specific to this iteration
+
+		// Optional: Add custom metrics if needed
+		// b.SetBytes(int64(numPackets * packetSize))
+	}
+}

@@ -246,13 +246,15 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 	defer idleTimer.Stop()
 	handleIncoming := func(event *streamEvent) {
 		if event.Type == streamIncoming {
-			c.logger.Trace("incoming packet",
-				"stream.streamEvents.len", len(stream.streamEvents),
-				"src.peer", c.cid.Peer,
-				"packet.type", event.Packet.Header.PacketType.String(),
-				"packet.seqNum", event.Packet.Header.SeqNum,
-				"packet.ackNum", event.Packet.Header.AckNum,
-				"buf.len", len(event.Packet.Body))
+			if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+				c.logger.Trace("incoming packet",
+					"stream.streamEvents.len", len(stream.streamEvents),
+					"src.peer", c.cid.Peer,
+					"packet.type", event.Packet.Header.PacketType.String(),
+					"packet.seqNum", event.Packet.Header.SeqNum,
+					"packet.ackNum", event.Packet.Header.AckNum,
+					"buf.len", len(event.Packet.Body))
+			}
 			// reset idle timeout
 			resetIdleTimer()
 			c.onPacket(event.Packet, time.Now())
@@ -262,7 +264,9 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 	}
 
 	handleWrites := func(write *queuedWrite, ok bool) {
-		c.logger.Trace("get queued write from writes", "dst.peer", c.cid.Peer, "content", len(write.data))
+		if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+			c.logger.Trace("get queued write from writes", "dst.peer", c.cid.Peer, "content", len(write.data))
+		}
 		resetIdleTimer()
 		c.onWrite(write)
 	}
@@ -294,31 +298,12 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 	var maxStreamEventLen int
 	for {
 		maxStreamEventLen = max(maxStreamEventLen, len(stream.streamEvents))
-		c.logger.Trace("connection event count",
-			"maxStreamEventLen", maxStreamEventLen,
-			"streamEvents.len", len(stream.streamEvents),
-			"readable.len", len(c.readable),
-			"writeable.len", len(c.writable))
-		select {
-		case event := <-stream.streamEvents:
-			handleIncoming(event)
-			goto afterSelect
-		default:
-		}
-		select {
-		case event := <-stream.streamEvents:
-			handleIncoming(event)
-			goto afterSelect
-		case write, ok := <-stream.writes:
-			handleWrites(write, ok)
-			goto afterSelect
-		case <-c.readable:
-			c.processReads()
-			goto afterSelect
-		case <-c.writable:
-			c.processWrites(time.Now())
-			goto afterSelect
-		default:
+		if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+			c.logger.Trace("connection event count",
+				"maxStreamEventLen", maxStreamEventLen,
+				"streamEvents.len", len(stream.streamEvents),
+				"readable.len", len(c.readable),
+				"writeable.len", len(c.writable))
 		}
 		select {
 		case event := <-stream.streamEvents:
@@ -338,7 +323,8 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 			c.logger.Trace("stream context done, will force stop...", "c.cid.peer", c.cid.Peer, "c.cid.Send", c.cid.Send, "c.cid.Recv", c.cid.Recv)
 			return c.ctx.Err()
 		}
-	afterSelect:
+
+		// Logic previously under 'afterSelect:'
 		if stream.shutdown.Load() && c.state.stateType != ConnClosed {
 			c.shutdown()
 		}
@@ -423,7 +409,7 @@ func (c *connection) processWrites(now time.Time) {
 	case ConnConnecting:
 		return
 	case ConnClosed:
-		if c.logger.Enabled(c.ctx, log.LevelTrace) {
+		if c.logger.Enabled(c.ctx, log.LevelWarn) {
 			c.logger.Warn("connection is closed, will not process pending writes",
 				"c.cid.send", c.cid.Send, "c.cid.recv", c.cid.Recv)
 		}
@@ -442,7 +428,9 @@ func (c *connection) processWrites(now time.Time) {
 	var payloads [][]byte
 
 	for windowSize > 0 {
-		c.logger.Trace("has window size to send a packet data in sendBuffer", "windowSize", windowSize)
+		if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+			c.logger.Trace("has window size to send a packet data in sendBuffer", "windowSize", windowSize)
+		}
 		maxDataSize := minUint32(windowSize, uint32(c.config.MaxPacketSize-64))
 		data := make([]byte, maxDataSize)
 		n := c.state.SendBuf.Read(data)
@@ -521,7 +509,9 @@ func (c *connection) onWrite(writeReq *queuedWrite) {
 				writeReq.resultCh <- &readOrWriteResult{Len: 0}
 			}
 		} else {
-			c.logger.Debug("append a queuedWrite to pending writes")
+			if c.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
+				c.logger.Debug("append a queuedWrite to pending writes")
+			}
 			c.pendingWrites = append(c.pendingWrites, writeReq)
 		}
 
@@ -898,7 +888,9 @@ func (c *connection) onState(seqNum, ackNum uint16) {
 }
 
 func (c *connection) onData(seqNum uint16, data []byte) error {
-	c.logger.Trace("on data packet", "seqNum", seqNum, "data.len", len(data))
+	if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+		c.logger.Trace("on data packet", "seqNum", seqNum, "data.len", len(data))
+	}
 	// If the data payload is empty, then reset the connection
 	if len(data) == 0 {
 		c.reset(ErrEmptyDataPayload)
@@ -910,14 +902,18 @@ func (c *connection) onData(seqNum uint16, data []byte) error {
 			return errors.New("unreachable: connection should be marked established")
 		} else {
 			// connection being established.
-			c.logger.Trace("connection being established, ignore", "src.peer", c.cid.Peer, "seqNum", seqNum)
+			if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+				c.logger.Trace("connection being established, ignore", "src.peer", c.cid.Peer, "seqNum", seqNum)
+			}
 			return nil
 		}
 
 	case ConnConnected:
 		if c.state.closing != nil && c.state.closing.RemoteFin != nil {
 			// connection is closing
-			c.logger.Trace("connection has received remote FIN", "src.peer", c.cid.Peer, "seqNum", seqNum)
+			if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+				c.logger.Trace("connection has received remote FIN", "src.peer", c.cid.Peer, "seqNum", seqNum)
+			}
 			start := c.state.RecvBuf.InitSeqNum()
 			seqRange := newCircularRangeInclusive(start, *c.state.closing.RemoteFin)
 			if !seqRange.Contains(seqNum) {
@@ -933,8 +929,10 @@ func (c *connection) onData(seqNum uint16, data []byte) error {
 				c.logger.Warn("write data to recv buffer, but available space is not enough",
 					"src.peer", c.cid.Peer, "seqNum", seqNum, "data.len", len(data))
 			}
-			c.logger.Trace("write data to recv buffer",
-				"src.peer", c.cid.Peer, "seqNum", seqNum, "data.len", len(data), "nextAckNum", c.state.RecvBuf.AckNum())
+			if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+				c.logger.Trace("write data to recv buffer",
+					"src.peer", c.cid.Peer, "seqNum", seqNum, "data.len", len(data), "nextAckNum", c.state.RecvBuf.AckNum())
+			}
 			return err
 		}
 	default:

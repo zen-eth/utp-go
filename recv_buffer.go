@@ -113,13 +113,16 @@ func (rb *receiveBuffer) Write(data []byte, seqNum uint16) error {
 		rb.logger.Trace("will handle pending data in recv buffer", "startSeq", next)
 	}
 
-	for {
-		item := rb.pending.Get(&pendingItem{seqNum: next})
-		if item == nil {
-			break
+	// Optimized loop: Iterate through pending packets starting from `next`
+	// sequence number. This is more efficient than calling `Get` repeatedly.
+	rb.pending.AscendGreaterOrEqual(&pendingItem{seqNum: next}, func(i btree.Item) bool {
+		item := i.(*pendingItem)
+		if item.seqNum != next {
+			// Found a gap, stop iterating
+			return false
 		}
 
-		pending := item.(*pendingItem)
+		pending := item
 
 		end := rb.offset + len(pending.data)
 		copy(rb.buf[rb.offset:end], pending.data)
@@ -130,7 +133,8 @@ func (rb *receiveBuffer) Write(data []byte, seqNum uint16) error {
 			rb.logger.Trace("will delete a pending data in recv buffer", "seq", next, "pending.len", rb.pending.Len())
 		}
 		next += 1
-	}
+		return true
+	})
 	if rb.logger != nil && rb.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 		rb.logger.Trace("handled pending data in recv buffer", "endSeq", next)
 	}

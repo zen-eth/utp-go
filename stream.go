@@ -78,28 +78,33 @@ func (s *UtpStream) ReadToEOF(ctx context.Context, buf *[]byte) (int, error) {
 	s.readLocker.Lock()
 	defer s.readLocker.Unlock()
 	n := 0
-	data := make([]byte, 0)
+	var intermediateBuf bytes.Buffer
 	for {
 		select {
 		case <-ctx.Done():
 			s.logger.Error("ctx has been canceled", "err", ctx.Err(), "n", n)
+			// *buf will not be updated with partial data if context is canceled
 			return n, ctx.Err()
 		case <-s.streamCtx.Done():
 			s.logger.Error("streamCtx has been canceled", "err", s.streamCtx.Err(), "n", n)
+			// *buf will not be updated with partial data if stream context is canceled
 			return 0, s.streamCtx.Err()
 		case res, ok := <-s.reads:
-			if !ok {
+			if !ok { // Channel closed, means EOF
+				*buf = intermediateBuf.Bytes()
 				return n, nil
 			}
 			if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 				s.logger.Trace("read a new buf", "len", res.Len)
 			}
-			if len(res.Data) == 0 {
+			if res.Err != nil || len(res.Data) == 0 { // Error from channel or explicit EOF signal
+				*buf = intermediateBuf.Bytes()
 				return n, res.Err
 			}
-			n += res.Len
-			data = append(data, res.Data[:res.Len]...)
-			*buf = data
+			// Write to intermediate buffer
+			written, _ := intermediateBuf.Write(res.Data[:res.Len])
+			n += written
+			// *buf is updated only at the end or on error/EOF
 		}
 	}
 }
