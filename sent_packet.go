@@ -403,7 +403,7 @@ func (s *sentPackets) FirstUnackedSeqNum() (uint16, error) {
 
 	var seqNum uint16
 	lastAckNum, isNone := s.LastAckNum()
-	if s.logger != nil {
+	if s.logger != nil && s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 		s.logger.Trace("get last innerMap num",
 			"lastAckNum", lastAckNum, "isNone", isNone)
 	}

@@ -39,7 +39,9 @@ func NewUtpStream(
 	streamEvents chan *streamEvent,
 	connected chan error,
 ) *UtpStream {
-	logger.Trace("new a utp stream", "dst.peer", cid.Peer, "dst.send", cid.Send, "dst.recv", cid.Recv)
+	if logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+		logger.Trace("new a utp stream", "dst.peer", cid.Peer, "dst.send", cid.Send, "dst.recv", cid.Recv)
+	}
 	connHandle := &sync.WaitGroup{}
 	connHandle.Add(1)
 	streamCtx, cancel := context.WithCancel(ctx)
@@ -135,7 +137,9 @@ func (s *UtpStream) Write(ctx context.Context, buf []byte) (int, error) {
 
 func (s *UtpStream) Close() {
 	s.closeOnce.Do(func() {
-		s.logger.Trace("call close utp stream", "dst.Peer", s.cid.Peer, "dst.send", s.cid.Send, "dst.recv", s.cid.Recv)
+		if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+			s.logger.Trace("call close utp stream", "dst.Peer", s.cid.Peer, "dst.send", s.cid.Send, "dst.recv", s.cid.Recv)
+		}
 		s.shutdown.Store(true)
 		// wait to consume write buffer and recv buffer
 		s.connHandle.Wait()
