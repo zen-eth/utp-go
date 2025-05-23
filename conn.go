@@ -591,7 +591,7 @@ func (c *connection) eof() bool {
 	}
 }
 
-func (c *connection) onTimeout(packet *packet, now time.Time) {
+func (c *connection) onTimeout(originPacket *packet, now time.Time) {
 	switch c.state.stateType {
 	case ConnConnecting:
 		if c.endpoint.Type == Acceptor {
@@ -624,7 +624,7 @@ func (c *connection) onTimeout(packet *packet, now time.Time) {
 			// Double previous timeout for exponential backoff on each attempt
 			timeout := c.config.InitialTimeout * time.Duration(math.Pow(1.5, float64(c.endpoint.Attempts)))
 
-			c.unacked.put(seq, packet, timeout)
+			c.unacked.put(seq, originPacket, timeout)
 
 			// Re-send SYN packet
 			c.socketEvents <- newOutgoingSocketEvent(c.synPacket(seq), c.cid)
@@ -632,7 +632,7 @@ func (c *connection) onTimeout(packet *packet, now time.Time) {
 
 	case ConnConnected:
 		// If the timed out packet is a SYN, do nothing
-		if packet.Header.PacketType == st_syn {
+		if originPacket.Header.PacketType == st_syn {
 			return
 		}
 
@@ -650,16 +650,27 @@ func (c *connection) onTimeout(packet *packet, now time.Time) {
 			c.latestTimeout = &currentTime
 		}
 
-		// Rebuild and retransmit packet
+		retransmissionPacket := &packet{
+			Header: &PacketHeaderV1{
+				PacketType:   originPacket.Header.PacketType,
+				Version:      originPacket.Header.Version,
+				Extension:    originPacket.Header.Extension,
+				ConnectionId: originPacket.Header.ConnectionId,
+				SeqNum:       originPacket.Header.SeqNum,
+			},
+			Body: originPacket.Body,
+			Eack: nil,
+		}
+
 		recvWindow := uint32(c.state.RecvBuf.Available())
 		nowMicros := time.Now().UnixMicro()
 		tsDiffMicros := uint32(c.peerTsDiff.Microseconds())
 
-		packet.Header.WndSize = recvWindow
-		packet.Header.Timestamp = nowMicros & 0xFFFF
-		packet.Header.TimestampDiff = tsDiffMicros
-		packet.Header.AckNum = c.state.RecvBuf.AckNum()
-		packet.Eack = c.state.RecvBuf.SelectiveAck()
+		retransmissionPacket.Header.WndSize = recvWindow
+		retransmissionPacket.Header.Timestamp = nowMicros
+		retransmissionPacket.Header.TimestampDiff = tsDiffMicros
+		retransmissionPacket.Header.AckNum = c.state.RecvBuf.AckNum()
+		retransmissionPacket.Eack = c.state.RecvBuf.SelectiveAck()
 
 		//newPacket := NewPacketBuilder(packet.Header.PacketType, packet.Header.ConnectionId, uint32(nowMicros), recvWindow, packet.Header.SeqNum).
 		//	WithAckNum(c.state.RecvBuf.AckNum()).
@@ -668,7 +679,7 @@ func (c *connection) onTimeout(packet *packet, now time.Time) {
 		//	WithPayload(packet.Body).
 		//	Build()
 
-		c.transmit(packet, now)
+		c.transmit(retransmissionPacket, now)
 	default:
 	}
 }
