@@ -196,9 +196,9 @@ func newConnection(
 		unacked:        newTimeWheel[*packet](config.InitialTimeout/4, 8, handleExpiration),
 		unackTimeoutCh: unackTimeoutCh,
 		reads:          reads,
-		readable:       make(chan struct{}, 1),
+		readable:       make(chan struct{}, 3),
 		pendingWrites:  make([]*queuedWrite, 0),
-		writable:       make(chan struct{}, 1),
+		writable:       make(chan struct{}, 3),
 		latestTimeout:  nil,
 	}
 }

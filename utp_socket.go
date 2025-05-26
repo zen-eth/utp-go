@@ -286,9 +286,16 @@ func (s *UtpSocket) handleIncomingBuf(incomingRaw *IncomingPacketRaw) {
 		cids[i] = cid
 		// Look for existing connection
 		if connStream := s.getConnStreamWithCids(cid, cidType); connStream != nil {
-			connStream <- &streamEvent{
+			select {
+			case connStream <- &streamEvent{
 				Type:   streamIncoming,
 				Packet: packetPtr,
+			}:
+			default:
+				if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+					s.logger.Warn("connection stream channel is full, dropping packet",
+						"connStream.len", len(connStream))
+				}
 			}
 			if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 				s.logger.Trace("recieve a packet for a exist conn stream", "connStream.len", len(connStream))
