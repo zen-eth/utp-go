@@ -193,9 +193,9 @@ func newConnection(
 		unacked:        newTimeWheel[*packet](config.InitialTimeout/4, 8, handleExpiration),
 		unackTimeoutCh: unackTimeoutCh,
 		reads:          reads,
-		readable:       make(chan struct{}, 1000),
+		readable:       make(chan struct{}, 10),
 		pendingWrites:  make([]*queuedWrite, 0),
-		writable:       make(chan struct{}, 1000),
+		writable:       make(chan struct{}, 10),
 		latestTimeout:  nil,
 	}
 }
@@ -500,7 +500,11 @@ func (c *connection) processWrites(now time.Time) {
 			writeReq.data = remainingData
 			writeReq.written += bufSpace
 		}
-		c.writable <- struct{}{}
+		select {
+		case c.writable <- struct{}{}:
+		default:
+			c.writable <- struct{}{}
+		}
 	}
 
 	// transmit data packets
@@ -554,7 +558,10 @@ func (c *connection) onWrite(writeReq *queuedWrite) {
 		writeReq.resultCh <- result
 	}
 	c.processWrites(time.Now())
-	c.writable <- struct{}{}
+	select {
+	case c.writable <- struct{}{}:
+	default:
+	}
 }
 
 func (c *connection) processReads() {
@@ -791,12 +798,18 @@ func (c *connection) onPacket(packet *packet, now time.Time) {
 
 	// Notify writable on STATE packets
 	if packet.Header.PacketType == st_state {
-		c.writable <- struct{}{}
+		select {
+		case c.writable <- struct{}{}:
+		default:
+		}
 	}
 
 	// Notify readable on data or FIN
 	if len(packet.Body) > 0 || packet.Header.PacketType == st_fin {
-		c.readable <- struct{}{}
+		select {
+		case c.readable <- struct{}{}:
+		default:
+		}
 	}
 
 	// Handle connection closing cases

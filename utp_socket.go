@@ -90,7 +90,7 @@ type UtpSocket struct {
 	ctx                      context.Context
 	cancel                   context.CancelFunc
 	logger                   log.Logger
-	connsMutex               sync.Mutex
+	connsMutex               sync.RWMutex
 	conns                    map[string]chan *streamEvent
 	accepts                  chan *Accept
 	acceptsWithCidCh         chan *Accept
@@ -180,9 +180,6 @@ func (s *UtpSocket) readLoop() {
 			dstBuf := make([]byte, n)
 			copy(dstBuf, buf[:n])
 			s.incomingBuf <- &IncomingPacketRaw{peer: from, payload: dstBuf}
-			if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-				s.logger.Trace("recv a packet from remote", "buf.len", n, "from", from, "s.incomingBuf.len", len(s.incomingBuf))
-			}
 		}
 
 	}
@@ -240,6 +237,9 @@ func (s *UtpSocket) eventLoop() {
 	for {
 		select {
 		case incomingRaw := <-s.incomingBuf:
+			if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+				s.logger.Trace("will handle a packet from remote", "s.incomingBuf.len", len(s.incomingBuf))
+			}
 			s.handleIncomingBuf(incomingRaw)
 			continue
 		default:
@@ -250,6 +250,9 @@ func (s *UtpSocket) eventLoop() {
 		case accept := <-s.accepts:
 			s.handleNewAcceptEvent(accept)
 		case incomingRaw := <-s.incomingBuf:
+			if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+				s.logger.Trace("will handle a packet from remote", "s.incomingBuf.len", len(s.incomingBuf))
+			}
 			s.handleIncomingBuf(incomingRaw)
 		case <-s.ctx.Done():
 			return
@@ -460,9 +463,6 @@ func (s *UtpSocket) GenerateCid(peer ConnectionPeer, isInitiator bool, eventCh c
 		}
 		generationAttemptCount++
 	}
-	if generationAttemptCount > CidGenerationTryWarningCount {
-		s.logger.Warn("tried to generate a cid", "times", generationAttemptCount, s.connsStreamLen())
-	}
 	return cid
 }
 
@@ -656,12 +656,6 @@ func (s *UtpSocket) selectAcceptHelper(
 	go s.awaitConnected(stream, accept, connected)
 }
 
-func (s *UtpSocket) connsStreamLen() int {
-	s.connsMutex.Lock()
-	defer s.connsMutex.Unlock()
-	return len(s.conns)
-}
-
 func (s *UtpSocket) removeConnStream(key string) {
 	s.connsMutex.Lock()
 	defer s.connsMutex.Unlock()
@@ -672,8 +666,8 @@ func (s *UtpSocket) removeConnStream(key string) {
 }
 
 func (s *UtpSocket) getConnStream(key string) (chan *streamEvent, bool) {
-	s.connsMutex.Lock()
-	defer s.connsMutex.Unlock()
+	s.connsMutex.RLock()
+	defer s.connsMutex.RUnlock()
 	ch, ok := s.conns[key]
 	return ch, ok
 }
@@ -688,8 +682,8 @@ func (s *UtpSocket) putConnStream(key string, streamCh chan *streamEvent) {
 }
 
 func (s *UtpSocket) sendShutdownEventToConns() {
-	s.connsMutex.Lock()
-	defer s.connsMutex.Unlock()
+	s.connsMutex.RLock()
+	defer s.connsMutex.RUnlock()
 	for _, ch := range s.conns {
 		ch <- &streamEvent{
 			Type: streamShutdown,
@@ -698,8 +692,8 @@ func (s *UtpSocket) sendShutdownEventToConns() {
 }
 
 func (s *UtpSocket) getConnStreamWithCids(cid *ConnectionId, idType IdType) chan *streamEvent {
-	s.connsMutex.Lock()
-	defer s.connsMutex.Unlock()
+	s.connsMutex.RLock()
+	defer s.connsMutex.RUnlock()
 	if ch, exist := s.conns[cid.Hash()]; exist {
 		if s.logger.Enabled(BASE_CONTEXT, log.LevelDebug) {
 			s.logger.Debug("get conn stream", "accInitCidKey", cid.Hash(), "accCid.Send", cid.Send, "accCid.Recv", cid.Recv)
