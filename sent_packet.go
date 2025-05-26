@@ -332,9 +332,10 @@ func (s *sentPackets) Ack(seqNum uint16, delay time.Duration, now time.Time) err
 	if s.logger != nil && s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 		log.Trace("record Acks", "seqNum", packetInst.seqNum, "acks.len", len(packetInst.acks)+1)
 	}
-	packetInst.acks = append(packetInst.acks, now)
-
-	s.lostPackets.Delete(packetInst.seqNum)
+	if len(packetInst.acks) == 0 {
+		packetInst.acks = append(packetInst.acks, now)
+		s.lostPackets.Delete(packetInst.seqNum)
+	}
 	return nil
 }
 
