@@ -13,7 +13,7 @@ const (
 	defaultInitialTimeout     = 4 * time.Second
 	defaultMinTimeout         = 500 * time.Millisecond
 	defaultMaxTimeout         = 60 * time.Second
-	defaultMaxPacketSizeBytes = 1024 * 4
+	defaultMaxPacketSizeBytes = 1024
 	defaultGain               = 1.0
 	defaultDelayWindow        = 120 * time.Second
 )
