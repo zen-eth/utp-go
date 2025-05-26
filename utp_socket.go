@@ -334,7 +334,7 @@ func (s *UtpSocket) handleIncomingBuf(incomingRaw *IncomingPacketRaw) {
 		stream := NewUtpStream(s.ctx, s.logger, cid, accept.config, packetPtr, s.socketEvents, newConnStream, connected)
 		go s.awaitConnected(stream, accept, connected)
 	} else {
-		s.logger.Info("put a new syn packet to incomingConns...")
+		s.logger.Debug("put a new syn packet to incomingConns...")
 		s.putIncomingConn(cidHash, &IncomingPacket{pkt: packetPtr, cid: cid})
 	}
 }
@@ -475,7 +475,11 @@ func (s *UtpSocket) Accept(ctx context.Context, config *ConnectionConfig) (*UtpS
 	}
 
 	// Send accept request through channel
-	s.accepts <- accept
+	select {
+	case s.accepts <- accept:
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
+	}
 
 	// Wait for stream or timeout
 	select {
@@ -499,7 +503,11 @@ func (s *UtpSocket) AcceptWithCid(ctx context.Context, cid *ConnectionId, config
 	}
 
 	// Send accept request through channel
-	s.acceptsWithCidCh <- accept
+	select {
+	case s.acceptsWithCidCh <- accept:
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
+	}
 
 	// Wait for stream or timeout
 	select {
