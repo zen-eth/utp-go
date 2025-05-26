@@ -321,21 +321,6 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 		select {
 		case event := <-stream.streamEvents:
 			handleIncoming(event)
-			goto afterSelect
-		case write, ok := <-stream.writes:
-			handleWrites(write, ok)
-			goto afterSelect
-		case <-c.readable:
-			c.processReads()
-			goto afterSelect
-		case <-c.writable:
-			c.processWrites(time.Now())
-			goto afterSelect
-		default:
-		}
-		select {
-		case event := <-stream.streamEvents:
-			handleIncoming(event)
 		case write, ok := <-stream.writes:
 			handleWrites(write, ok)
 		case <-c.readable:
