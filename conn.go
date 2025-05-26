@@ -177,7 +177,10 @@ func newConnection(
 
 	unackTimeoutCh := make(chan *packet, 1000)
 	handleExpiration := func(key any, pkt *packet) {
-		unackTimeoutCh <- pkt
+		select {
+		case unackTimeoutCh <- pkt:
+		case <-ctx.Done():
+		}
 	}
 
 	return &connection{
@@ -193,9 +196,9 @@ func newConnection(
 		unacked:        newTimeWheel[*packet](config.InitialTimeout/4, 8, handleExpiration),
 		unackTimeoutCh: unackTimeoutCh,
 		reads:          reads,
-		readable:       make(chan struct{}, 10),
+		readable:       make(chan struct{}, 1),
 		pendingWrites:  make([]*queuedWrite, 0),
-		writable:       make(chan struct{}, 10),
+		writable:       make(chan struct{}, 1),
 		latestTimeout:  nil,
 	}
 }
@@ -210,7 +213,9 @@ func (c *connection) eventLoop(stream *UtpStream) error {
 		synSeqNum := c.endpoint.SynNum
 		synPkt := c.synPacket(synSeqNum)
 		c.socketEvents <- newOutgoingSocketEvent(synPkt, c.cid)
-		c.logger.Debug("put a initial syn packet to delay map", "socketEvents.len", len(c.socketEvents), "dst.peer", c.cid.Peer, "synSeqNum", synSeqNum)
+		if c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
+			c.logger.Trace("put a initial syn packet to delay map", "socketEvents.len", len(c.socketEvents), "dst.peer", c.cid.Peer, "synSeqNum", synSeqNum)
+		}
 		c.unacked.put(synSeqNum, synPkt, c.config.InitialTimeout)
 
 		c.endpoint.Attempts = 1
@@ -473,9 +478,6 @@ func (c *connection) processWrites(now time.Time) {
 		windowSize -= uint32(n)
 	}
 
-	for windowSize == 0 && len(c.writable) > 10 {
-		<-c.writable
-	}
 	// Write pending data to send buffer
 	for len(c.pendingWrites) > 0 {
 		bufSpace := c.state.SendBuf.Available()
@@ -503,7 +505,6 @@ func (c *connection) processWrites(now time.Time) {
 		select {
 		case c.writable <- struct{}{}:
 		default:
-			c.writable <- struct{}{}
 		}
 	}
 
@@ -593,7 +594,7 @@ func (c *connection) processReads() {
 		c.reads <- &readOrWriteResult{Data: buf, Len: n}
 	}
 	if recvBuf != nil && c.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
-		c.logger.Trace("read data saving in the recvBuf, end...", "duration", currentTime, "available", recvBuf.Available(), "isEmpty", recvBuf.IsEmpty())
+		c.logger.Trace("read data saving in the recvBuf, end...", "duration", time.Since(currentTime), "available", recvBuf.Available(), "isEmpty", recvBuf.IsEmpty())
 	}
 
 	// If we have reached eof, send an empty resultCh to all pending reads

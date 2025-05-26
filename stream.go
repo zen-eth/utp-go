@@ -111,7 +111,11 @@ func (s *UtpStream) Write(ctx context.Context, buf []byte) (int, error) {
 		return 0, ErrNotConnected
 	}
 	resCh := make(chan *readOrWriteResult, 1)
-	s.writes <- &queuedWrite{buf, 0, resCh}
+	select {
+	case s.writes <- &queuedWrite{buf, 0, resCh}:
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
 	if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 		s.logger.Trace("created a new queued write to writes channel",
 			"dst.peer", s.cid.Peer,
