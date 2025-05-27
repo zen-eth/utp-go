@@ -294,8 +294,9 @@ func (s *UtpSocket) handleIncomingBuf(incomingRaw *IncomingPacketRaw) {
 			default:
 				if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 					s.logger.Warn("connection stream channel is full, dropping packet",
-						"connStream.len", len(connStream))
+						"connStream.len", len(connStream), "cid.send", cid.Send, "cid.recv", cid.Recv, "cid.peer", cid.Peer.Hash())
 				}
+				return
 			}
 			if s.logger.Enabled(BASE_CONTEXT, log.LevelTrace) {
 				s.logger.Trace("recieve a packet for a exist conn stream", "connStream.len", len(connStream))
