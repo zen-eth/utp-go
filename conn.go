@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"time"
 
@@ -584,7 +585,7 @@ func (c *connection) processReads() {
 
 	// If we have reached eof, send an empty resultCh to all pending reads
 	if c.eof() {
-		c.reads <- &readOrWriteResult{Data: make([]byte, 0)}
+		c.reads <- &readOrWriteResult{Err: io.EOF, Data: make([]byte, 0)}
 	}
 }
 
@@ -761,13 +762,16 @@ func (c *connection) onPacket(packet *packet, now time.Time) {
 	case st_syn:
 		if c.synState == nil {
 			// Teh synState is generated at the beginning of the eventLoop
-			c.logger.Warn("missing SYN STATE, ")
+			c.logger.Warn("missing SYN STATE")
 			if statePacket := c.statePacket(); statePacket != nil {
 				c.synState = statePacket
+				c.socketEvents <- newOutgoingSocketEvent(c.synState, c.cid)
+			} else {
+				randSeqNum := RandomUint16()
+				resetPacket := NewPacketBuilder(st_reset, packet.Header.ConnectionId, uint32(time.Now().UnixMicro()), 100_000, randSeqNum).Build()
+				c.socketEvents <- newOutgoingSocketEvent(resetPacket, c.cid)
 			}
 		}
-
-		c.socketEvents <- newOutgoingSocketEvent(c.synState, c.cid)
 
 	case st_data, st_fin:
 		if statePacket := c.statePacket(); statePacket != nil {
