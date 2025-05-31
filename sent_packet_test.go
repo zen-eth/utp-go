@@ -41,8 +41,8 @@ func TestOnTransmitInitial(t *testing.T) {
 	if len(packetInst.acks) != 0 {
 		t.Errorf("expected empty acks, got %d", len(packetInst.acks))
 	}
-	if len(packetInst.retransmissions) != 0 {
-		t.Errorf("expected empty retransmissions, got %d", len(packetInst.retransmissions))
+	if packetInst.retransmission != packetInst.transmission {
+		t.Errorf("expected initial retransmission, got %v", packetInst.retransmission)
 	}
 }
 
@@ -74,11 +74,11 @@ func TestOnTransmitRetransmit(t *testing.T) {
 	if len(packetInst.acks) != 0 {
 		t.Errorf("expected empty acks, got %d", len(packetInst.acks))
 	}
-	if len(packetInst.retransmissions) != 1 {
-		t.Errorf("expected 1 retransmission, got %d", len(packetInst.retransmissions))
+	if packetInst.retransmission == packetInst.transmission {
+		t.Errorf("expected retransmission was updated, got %v", packetInst.retransmission)
 	}
-	if !packetInst.retransmissions[0].Equal(second) {
-		t.Errorf("expected retransmission time %v, got %v", second, packetInst.retransmissions[0])
+	if packetInst.retransmission != second {
+		t.Errorf("expected retransmission time %v, got %v", second, packetInst.retransmission)
 	}
 }
 

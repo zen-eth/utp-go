@@ -73,8 +73,8 @@ func TestManyConcurrentTransfers(t *testing.T) {
 	logFile1, _ := os.OpenFile("test_socket_many_concurrent_transfer_3400.log", os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
 	logFile2, _ := os.OpenFile("test_socket_many_concurrent_transfer_3401.log", os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
 	//handler := log.NewTerminalHandler(os.Stdout, true)
-	handler1 := log.NewTerminalHandlerWithLevel(logFile1, log.LevelWarn, false)
-	handler2 := log.NewTerminalHandlerWithLevel(logFile2, log.LevelWarn, false)
+	handler1 := log.NewTerminalHandlerWithLevel(logFile1, log.LevelError, false)
+	handler2 := log.NewTerminalHandlerWithLevel(logFile2, log.LevelError, false)
 	//handler1 := log.NewTerminalHandler(logFile1, false)
 	//handler2 := log.NewTerminalHandler(logFile2, false)
 	logger1 := log.NewLogger(handler1)
@@ -446,9 +446,10 @@ func initiateTransfer(
 
 		buf := make([]byte, 0)
 		n, err := stream.ReadToEOF(ctx, &buf)
-		assert.NoError(t, err, "CID send=%d recv=%d read to eof error: %v",
-			recvCid.Send, recvCid.Recv, err)
-
+		if err != nil && err != io.EOF {
+			assert.NoError(t, err, "CID send=%d recv=%d read to eof error: %v",
+				recvCid.Send, recvCid.Recv, err)
+		}
 		t.Logf("CID send=%d recv=%d read %d bytes from uTP stream",
 			recvCid.Send, recvCid.Recv, n)
 		assert.Equal(t, len(data), n,

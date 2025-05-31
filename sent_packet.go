@@ -23,20 +23,20 @@ type LostPacket struct {
 }
 
 type sentPacket struct {
-	seqNum          uint16
-	packetType      PacketType
-	data            []byte
-	transmission    time.Time
-	retransmissions []time.Time
-	acks            []time.Time
+	seqNum         uint16
+	packetType     PacketType
+	data           []byte
+	transmission   time.Time
+	retransmission time.Time
+	acks           []time.Time
 }
 
 func (s *sentPacket) rtt(now time.Time) time.Duration {
 	var lastTransmission time.Time
-	if len(s.retransmissions) == 0 {
+	if s.retransmission == s.transmission {
 		lastTransmission = s.transmission
 	} else {
-		lastTransmission = s.retransmissions[0]
+		lastTransmission = s.retransmission
 	}
 	return now.Sub(lastTransmission)
 }
@@ -155,16 +155,16 @@ func (s *sentPackets) OnTransmit(
 
 	if index < len(s.packets) {
 		// Update existing packet
-		s.packets[index].retransmissions = append(s.packets[index].retransmissions, now)
+		s.packets[index].retransmission = now
 	} else {
 		// Create new packet
 		sent := &sentPacket{
-			seqNum:          seqNum,
-			packetType:      packetType,
-			data:            data,
-			transmission:    now,
-			retransmissions: make([]time.Time, 0),
-			acks:            make([]time.Time, 0),
+			seqNum:         seqNum,
+			packetType:     packetType,
+			data:           data,
+			transmission:   now,
+			retransmission: now,
+			acks:           make([]time.Time, 0),
 		}
 		s.packets = append(s.packets, sent)
 	}
