@@ -84,10 +84,10 @@ func (s *UtpStream) ReadToEOF(ctx context.Context, buf *[]byte) (int, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			s.logger.Error("ctx has been canceled", "err", ctx.Err(), "n", n)
+			s.logger.Error("ctx has been canceled", "err", ctx.Err(), "readLength", n)
 			return n, ctx.Err()
 		case <-s.streamCtx.Done():
-			s.logger.Error("streamCtx has been canceled", "err", s.streamCtx.Err(), "n", n)
+			s.logger.Error("streamCtx has been canceled", "err", s.streamCtx.Err(), "readLength", n)
 			return 0, s.streamCtx.Err()
 		case res, ok := <-s.reads:
 			if !ok {

@@ -523,7 +523,6 @@ func (s *UtpSocket) AcceptWithCid(ctx context.Context, cid *ConnectionId, config
 		if streamRes == nil {
 			return nil, fmt.Errorf("stream creation failed")
 		}
-		s.logger.Info("accept success", "cid.Peer", streamRes.stream.cid.Peer, "cid.Send", streamRes.stream.cid.Send, "cid.Recv", streamRes.stream.cid.Recv)
 		return streamRes.stream, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
